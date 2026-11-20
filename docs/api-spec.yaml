@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: Duka Ledger Shared API Specification
+  version: 1.0.0
+  description: Official unified contract between Developer A (Trader App) and Developer B (Backend & Community)
+paths:
+  /auth/request-otp:
+    post:
+      summary: Request phone SMS OTP for authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  example: "+254712345678"
+      responses:
+        '200':
+          description: OTP dispatched successfully
+  /auth/verify-otp:
+    post:
+      summary: Verify OTP code and obtain JWT bearer token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, otp_code]
+              properties:
+                phone:
+                  type: string
+                otp_code:
+                  type: string
+      responses:
+        '200':
+          description: Access token granted
+  /shops/me:
+    get:
+      summary: Retrieve authenticated trader shop profile
+      responses:
+        '200':
+          description: Shop details
+    put:
+      summary: Update trader shop profile
+      responses:
+        '200':
+          description: Profile updated
+  /shops/me/publish:
+    post:
+      summary: Publish public shop directory page for nearby buyers
+      responses:
+        '200':
+          description: Shop page is now public
+  /sync/push:
+    post:
+      summary: Push batch modifications from offline mobile client
+      responses:
+        '200':
+          description: Sync batch accepted
+  /sync/pull:
+    get:
+      summary: Pull remote modifications since a given timestamp
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Delta payload
+  /locations:
+    get:
+      summary: Retrieve master hierarchy of Kenya counties, areas, and estates
+      responses:
+        '200':
+          description: List of locations
+  /prices/range:
+    get:
+      summary: Anonymous price comparison range and median
+      parameters:
+        - name: item
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: location
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Price statistics (min 3 contributing shops)
