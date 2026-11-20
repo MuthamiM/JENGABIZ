@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Duka Ledger</string>
+    <string name="tab_sales">Sales</string>
+    <string name="tab_stock">Stock</string>
+    <string name="tab_summary">Summary</string>
+    <string name="tab_settings">Settings</string>
+</resources>

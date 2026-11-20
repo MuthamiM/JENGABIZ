@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Duka Ledger</string>
+    <string name="tab_sales">Mauzo na Madeni</string>
+    <string name="tab_stock">Stoo</string>
+    <string name="tab_summary">Muhtasari</string>
+    <string name="tab_settings">Mipangilio</string>
+</resources>
