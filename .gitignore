@@ -1,3 +1,7 @@
+# SQLite
+*.db-shm
+*.db-wal
+
 node_modules/
 dist/
 build/
@@ -19,3 +23,13 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/build/
+**/android/.gradle/
+**/android/local.properties
+**/android/app/build/
+

@@ -502,10 +502,10 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return NavShell(active: AppScreen.home, go: go, children: [
       AppHeader(go: go, unread: unread),
-      Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Hi, '),
+      const Text.rich(TextSpan(children: [
+        TextSpan(text: 'Hi, '),
         TextSpan(text: 'Alex Smith', style: TextStyle(color: kPurple, fontWeight: FontWeight.w700)),
-      ]), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, letterSpacing: -1)),
+      ]), style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600, letterSpacing: -1)),
       const Text("here's your business overview", style: TextStyle(fontSize: 14)),
       const SizedBox(height: 18),
       GestureDetector(
@@ -527,17 +527,17 @@ class HomeScreen extends StatelessWidget {
               child: const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFFA75357)),
             ),
             const SizedBox(width: 16),
-            Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Total Earnings', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              const SizedBox(height: 4),
-              Row(children: const [
+            const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Total Earnings', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              SizedBox(height: 4),
+              Row(children: [
                 Text('\$12,540.90',
                     style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
                 SizedBox(width: 6),
                 Pill('↗ 18%'),
               ]),
-              const SizedBox(height: 4),
-              const Text('vs last month', style: TextStyle(color: Colors.white60, fontSize: 11)),
+              SizedBox(height: 4),
+              Text('vs last month', style: TextStyle(color: Colors.white60, fontSize: 11)),
             ]),
             const Spacer(),
             SizedBox(width: 60, height: 56, child: CustomPaint(painter: SparklinePainter())),
@@ -552,16 +552,16 @@ class HomeScreen extends StatelessWidget {
         child: Row(children: [
           SizedBox(width: 58, height: 58, child: CustomPaint(painter: PiePainter())),
           const SizedBox(width: 21),
-          Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Net Profit', style: TextStyle(fontSize: 12)),
-            const SizedBox(height: 4),
-            Row(children: const [
+          const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Net Profit', style: TextStyle(fontSize: 12)),
+            SizedBox(height: 4),
+            Row(children: [
               Text('\$7,540.90', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               SizedBox(width: 6),
               Pill('↗ 18%'),
             ]),
-            const SizedBox(height: 4),
-            const Text('vs last month', style: TextStyle(color: kMuted, fontSize: 11)),
+            SizedBox(height: 4),
+            Text('vs last month', style: TextStyle(color: kMuted, fontSize: 11)),
           ]),
         ]),
       ),
@@ -742,7 +742,7 @@ class AnalyticsScreen extends StatelessWidget {
     return NavShell(active: AppScreen.analytics, go: go, children: [
       AppHeader(go: go, unread: unread, onBack: () => go(AppScreen.home)),
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Row(children: const [
+        const Row(children: [
           Text('July 2024', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
           Icon(Icons.keyboard_arrow_down_rounded, color: kMuted),
         ]),
