@@ -1,0 +1,40 @@
+services:
+  jengabiz-redis:
+    image: redis:7-alpine
+    container_name: jengabiz-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - jengabiz_redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jengabiz-api:
+    build:
+      context: ./backend-csharp
+      dockerfile: Dockerfile
+    container_name: jengabiz-api
+    restart: unless-stopped
+    depends_on:
+      jengabiz-redis:
+        condition: service_healthy
+    ports:
+      - "5080:5080"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__SqliteConnection=Data Source=/app/data/duka_ledger.db
+      - ConnectionStrings__Redis=jengabiz-redis:6379
+      - DatabaseProvider=Sqlite
+    volumes:
+      - jengabiz_db_data:/app/data
+
+volumes:
+  jengabiz_redis_data:
+  jengabiz_db_data:
+

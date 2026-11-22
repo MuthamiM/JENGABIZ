@@ -292,8 +292,8 @@ function Welcome({ onStart }: { onStart: () => void }) {
     <main className="screen welcome-screen">
       <StatusBar />
       <div className="welcome-content">
-        <div className="brand-chip">
-          <span>DL</span> DUKA LEDGER
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
+          <img src="/favicon.png" alt="JengaBiz" style={{ width: '42px', height: '42px', borderRadius: '12px' }} />
         </div>
         <div className="hero-art">
           <span className="hero-dot dot-a" />
@@ -669,7 +669,7 @@ function Profile({ onChange, onLogout }: { onChange: (s: Screen) => void; onLogo
           </div>
           <h2>Alex Smith</h2>
           <p>alex@dukaledger.com</p>
-          <span className="count-pill">Duka Ledger Pro</span>
+          <span className="count-pill">JengaBiz Pro</span>
         </section>
         <div className="stat-grid">
           <div className="stat-card">

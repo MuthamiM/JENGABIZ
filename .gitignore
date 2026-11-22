@@ -33,3 +33,14 @@ logs/
 **/android/local.properties
 **/android/app/build/
 
+# Secrets — NEVER commit API keys or credentials
+flutter_app/lib/config/secrets.dart
+*.keystore
+*.jks
+*.p12
+*.key
+
+# APK / AAB release artifacts
+*.apk
+*.aab
+

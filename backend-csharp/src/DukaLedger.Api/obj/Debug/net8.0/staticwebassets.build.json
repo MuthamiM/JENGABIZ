@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "/Il1NCmN77DchEVWiMqcRVS2kYTRadCO6XnOkBhiHpM=",
+  "Source": "DukaLedger.Api",
+  "BasePath": "_content/DukaLedger.Api",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
