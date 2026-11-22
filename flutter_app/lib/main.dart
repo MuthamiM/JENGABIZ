@@ -1,11 +1,14 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'screens/auth_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/stock_screen.dart';
+import 'services/api_service.dart';
 import 'services/db_service.dart';
 import 'services/location_biometric_service.dart';
 
@@ -22,7 +25,6 @@ const kShadow = Color(0x14373159);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await JengaDB.instance.init();
   runApp(const JengaBizApp());
 }
 
@@ -73,17 +75,19 @@ class Root extends StatefulWidget {
 
 class _RootState extends State<Root> {
   late AppScreen screen;
+  late final Future<void> _databaseReady;
 
   @override
   void initState() {
     super.initState();
-    // Direct start with no splash screen
-    if (JengaDB.instance.currentUser != null) {
-      screen = AppScreen.home;
-    } else {
-      screen = AppScreen.auth;
-    }
+    screen = AppScreen.welcome;
+    _databaseReady = JengaDB.instance.init().catchError((_) {});
     _initAppLocation();
+  }
+
+  Future<void> _openAuth() async {
+    await _databaseReady;
+    if (mounted) go(AppScreen.auth);
   }
 
   void _initAppLocation() async {
@@ -92,7 +96,8 @@ class _RootState extends State<Root> {
       if (pos != null) {
         JengaDB.instance.latitude = pos.latitude;
         JengaDB.instance.longitude = pos.longitude;
-        final hub = LocationBiometricService.instance.findNearestHub(pos.latitude, pos.longitude);
+        final hub = LocationBiometricService.instance
+            .findNearestHub(pos.latitude, pos.longitude);
         final dist = LocationBiometricService.instance.calculateDistanceKm(
           pos.latitude,
           pos.longitude,
@@ -107,32 +112,57 @@ class _RootState extends State<Root> {
   }
 
   final List<Notice> notices = [
-    Notice(1, 'New order received', 'Wireless Headphone x2 was ordered for KES 501.50.',
-        '2m ago', kTintPurple, Icons.shopping_bag_outlined),
-    Notice(2, 'Payment received', 'KES 1,240.00 has been added to your earnings.',
-        '1h ago', kTintMint, Icons.download_rounded),
+    Notice(
+        1,
+        'New order received',
+        'Wireless Headphone x2 was ordered for KES 501.50.',
+        '2m ago',
+        kTintPurple,
+        Icons.shopping_bag_outlined),
+    Notice(
+        2,
+        'Payment received',
+        'KES 1,240.00 has been added to your earnings.',
+        '1h ago',
+        kTintMint,
+        Icons.download_rounded),
     Notice(3, 'Low stock alert', 'Running Shoes is down to 12 units.', '3h ago',
         kTintPeach, Icons.inventory_2_outlined),
-    Notice(4, 'Delivery completed', 'Order #13620 was delivered to the customer.',
-        'Yesterday', kTintBlue, Icons.local_shipping_outlined, read: true),
-    Notice(5, 'Monthly report ready', 'Your July 2024 report is ready to export.',
-        '2 days ago', kTintPurple, Icons.bar_chart_rounded, read: true),
+    Notice(
+        4,
+        'Delivery completed',
+        'Order #13620 was delivered to the customer.',
+        'Yesterday',
+        kTintBlue,
+        Icons.local_shipping_outlined,
+        read: true),
+    Notice(
+        5,
+        'Monthly report ready',
+        'Your July 2024 report is ready to export.',
+        '2 days ago',
+        kTintPurple,
+        Icons.bar_chart_rounded,
+        read: true),
   ];
 
   int get unread {
-    final halfSoldCount = JengaDB.instance.items.where((i) => i.isHalfSold).length;
+    final halfSoldCount =
+        JengaDB.instance.items.where((i) => i.isHalfSold).length;
     final noticeCount = notices.where((n) => !n.read).length;
     return halfSoldCount > 0 ? (noticeCount + 3) : noticeCount;
   }
+
   void go(AppScreen s) => setState(() => screen = s);
 
   Widget _body() {
     switch (screen) {
       case AppScreen.welcome:
+        return WelcomeScreen(onStart: _openAuth);
       case AppScreen.auth:
         return AuthScreen(
           onSuccess: () => go(AppScreen.home),
-          onBack: () {},
+          onBack: () => go(AppScreen.welcome),
         );
       case AppScreen.stock:
         return StockScreen(
@@ -144,7 +174,10 @@ class _RootState extends State<Root> {
         return AnalyticsScreen(go: go, unread: unread);
       case AppScreen.profile:
         return ProfileScreen(
-            go: go, unread: unread, onLogout: () async {
+            go: go,
+            unread: unread,
+            onLogout: () async {
+              await JengaApiService.instance.logoutAccount();
               await JengaDB.instance.logout();
               go(AppScreen.auth);
             });
@@ -182,7 +215,8 @@ class _RootState extends State<Root> {
 // ---------- Shared widgets ----------
 
 class RoundBtn extends StatelessWidget {
-  const RoundBtn({super.key, required this.icon, required this.onTap, this.badge = 0});
+  const RoundBtn(
+      {super.key, required this.icon, required this.onTap, this.badge = 0});
   final IconData icon;
   final VoidCallback onTap;
   final int badge;
@@ -198,7 +232,9 @@ class RoundBtn extends StatelessWidget {
           decoration: const BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: kShadow, blurRadius: 14, offset: Offset(0, 4))]),
+              boxShadow: [
+                BoxShadow(color: kShadow, blurRadius: 14, offset: Offset(0, 4))
+              ]),
           child: Icon(icon, size: 22, color: const Color(0xFF17162A)),
         ),
         if (badge > 0)
@@ -215,7 +251,9 @@ class RoundBtn extends StatelessWidget {
                   border: Border.all(color: kBg, width: 2)),
               child: Text('$badge',
                   style: const TextStyle(
-                      color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800)),
             ),
           ),
       ]),
@@ -224,7 +262,8 @@ class RoundBtn extends StatelessWidget {
 }
 
 class AppHeader extends StatelessWidget {
-  const AppHeader({super.key, required this.go, required this.unread, this.onBack});
+  const AppHeader(
+      {super.key, required this.go, required this.unread, this.onBack});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback? onBack;
@@ -237,7 +276,8 @@ class AppHeader extends StatelessWidget {
         onBack != null
             ? RoundBtn(icon: Icons.arrow_back_rounded, onTap: onBack!)
             : GestureDetector(
-                onTap: () => go(AppScreen.profile), child: const Avatar(size: 46)),
+                onTap: () => go(AppScreen.profile),
+                child: const Avatar(size: 46)),
         Row(children: [
           RoundBtn(
               icon: Icons.notifications_none_rounded,
@@ -261,15 +301,17 @@ class Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = JengaDB.instance.currentUser;
-    final initial = letter ?? (user != null && user.name.trim().isNotEmpty
-        ? user.name.trim()[0].toUpperCase()
-        : 'J');
+    final initial = letter ??
+        (user != null && user.name.trim().isNotEmpty
+            ? user.name.trim()[0].toUpperCase()
+            : 'J');
     return Container(
       width: size,
       height: size,
       decoration: const BoxDecoration(
           shape: BoxShape.circle,
-          gradient: LinearGradient(colors: [Color(0xFF1E6BFF), Color(0xFF60A5FA)])),
+          gradient:
+              LinearGradient(colors: [Color(0xFF1E6BFF), Color(0xFF60A5FA)])),
       alignment: Alignment.center,
       child: Container(
         width: size * .54,
@@ -290,7 +332,11 @@ class Avatar extends StatelessWidget {
 /// Scrollable page with a floating nav that hides while scrolling and
 /// returns when scrolling ends.
 class NavShell extends StatefulWidget {
-  const NavShell({super.key, required this.active, required this.go, required this.children});
+  const NavShell(
+      {super.key,
+      required this.active,
+      required this.go,
+      required this.children});
   final AppScreen active;
   final void Function(AppScreen) go;
   final List<Widget> children;
@@ -335,7 +381,8 @@ class _NavShellState extends State<NavShell> {
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 300),
               opacity: hidden ? 0 : 1,
-              child: Center(child: FloatingNav(active: widget.active, go: widget.go)),
+              child: Center(
+                  child: FloatingNav(active: widget.active, go: widget.go)),
             ),
           ),
         ),
@@ -359,7 +406,8 @@ class FloatingNav extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(26),
           gradient: on
-              ? const LinearGradient(colors: [Color(0xFF5A3CE5), Color(0xFF8D58EF)])
+              ? const LinearGradient(
+                  colors: [Color(0xFF5A3CE5), Color(0xFF8D58EF)])
               : null,
         ),
         child: Icon(icon, color: on ? Colors.white : const Color(0xFF747186)),
@@ -376,7 +424,10 @@ class FloatingNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xEBFFFFFF),
         borderRadius: BorderRadius.circular(33),
-        boxShadow: const [BoxShadow(color: Color(0x24382F60), blurRadius: 30, offset: Offset(0, 10))],
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x24382F60), blurRadius: 30, offset: Offset(0, 10))
+        ],
       ),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         _item(Icons.home_outlined, AppScreen.home),
@@ -388,15 +439,20 @@ class FloatingNav extends StatelessWidget {
 }
 
 class Pill extends StatelessWidget {
-  const Pill(this.text, {super.key, this.bg = const Color(0xFFC8F1DB), this.fg = const Color(0xFF27936A)});
+  const Pill(this.text,
+      {super.key,
+      this.bg = const Color(0xFFC8F1DB),
+      this.fg = const Color(0xFF27936A)});
   final String text;
   final Color bg, fg;
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
         child: Text(text,
-            style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: fg, fontSize: 10, fontWeight: FontWeight.w700)),
       );
 }
 
@@ -405,7 +461,9 @@ BoxDecoration cardDeco(Color c) {
     color: c,
     borderRadius: BorderRadius.circular(20),
     boxShadow: c == Colors.white
-        ? const [BoxShadow(color: kShadow, blurRadius: 22, offset: Offset(0, 8))]
+        ? const [
+            BoxShadow(color: kShadow, blurRadius: 22, offset: Offset(0, 8))
+          ]
         : null,
   );
 }
@@ -416,7 +474,8 @@ class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key, required this.onStart});
   final VoidCallback onStart;
 
-  Widget _feature(IconData icon, List<Color> colors, String title, String body) {
+  Widget _feature(
+      IconData icon, List<Color> colors, String title, String body) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(children: [
@@ -430,10 +489,15 @@ class WelcomeScreen extends StatelessWidget {
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text(body, style: const TextStyle(fontSize: 11, height: 1.6, color: kMuted)),
+            Text(body,
+                style:
+                    const TextStyle(fontSize: 11, height: 1.6, color: kMuted)),
           ]),
         ),
       ]),
@@ -449,35 +513,48 @@ class WelcomeScreen extends StatelessWidget {
           child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const SizedBox(height: 12),
-                Center(
-                  child: Image.asset(
-                    'assets/jengabiz_mark.png',
-                    height: 42,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Image.asset('assets/duka-growth-hero.png',
-                      height: 250, fit: BoxFit.contain),
-                ),
-                const SizedBox(height: 8),
-                const Text('SMARTER BUSINESS, EVERY DAY',
-                    style: TextStyle(
-                        color: kBlue, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
-                const SizedBox(height: 8),
-                const Text('Kickstart Your Business\nGrowth Today',
-                    style: TextStyle(fontSize: 27, height: 1.28, fontWeight: FontWeight.w700, letterSpacing: -1)),
-                const SizedBox(height: 24),
-                _feature(Icons.bar_chart_rounded, const [Color(0xFF1E6BFF), Color(0xFF3B82F6)],
-                    'Smart lead tracking',
-                    'Stay organized and monitor every lead in one place with real-time updates.'),
-                _feature(Icons.settings_outlined, const [Color(0xFF0284C7), Color(0xFF38BDF8)],
-                    'Automated workflow',
-                    'Save time with automated tasks, follow-ups, and reminders to close deals faster.'),
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Image.asset(
+                        'assets/jengabiz_mark.png',
+                        height: 42,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Image.asset('assets/duka-growth-hero.png',
+                          height: 250, fit: BoxFit.contain),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('A CLEARER VIEW OF YOUR DUKA',
+                        style: TextStyle(
+                            color: kBlue,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2)),
+                    const SizedBox(height: 8),
+                    const Text('Your shop, stock and sales — all in view.',
+                        style: TextStyle(
+                            fontSize: 25,
+                            height: 1.28,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -1)),
+                    const SizedBox(height: 24),
+                    _feature(
+                        Icons.bar_chart_rounded,
+                        const [Color(0xFF1E6BFF), Color(0xFF3B82F6)],
+                        'Know what is in stock',
+                        'Keep products, quantities and prices organized in one simple catalog.'),
+                    _feature(
+                        Icons.settings_outlined,
+                        const [Color(0xFF0284C7), Color(0xFF38BDF8)],
+                        'See what needs attention',
+                        'Spot low stock and best sellers so you can make your next move with confidence.'),
+                  ]),
             ),
           ),
         ),
@@ -511,7 +588,7 @@ class WelcomeScreen extends StatelessWidget {
                       const SizedBox(width: 44),
                       const Expanded(
                         child: Text(
-                          "Let's Get Started",
+                          'Explore JengaBiz',
                           textAlign: TextAlign.center,
                           maxLines: 1,
                           overflow: TextOverflow.visible,
@@ -568,8 +645,14 @@ class SparklinePainter extends CustomPainter {
       }
     } else {
       const defaultPts = [
-        Offset(0, .9), Offset(.15, .62), Offset(.28, .7), Offset(.5, .72),
-        Offset(.62, .45), Offset(.78, .22), Offset(.9, .45), Offset(1, .05),
+        Offset(0, .9),
+        Offset(.15, .62),
+        Offset(.28, .7),
+        Offset(.5, .72),
+        Offset(.62, .45),
+        Offset(.78, .22),
+        Offset(.9, .45),
+        Offset(1, .05),
       ];
       for (final p in defaultPts) {
         pts.add(Offset(p.dx * size.width, p.dy * size.height));
@@ -578,7 +661,9 @@ class SparklinePainter extends CustomPainter {
 
     final path = Path();
     for (var i = 0; i < pts.length; i++) {
-      i == 0 ? path.moveTo(pts[i].dx, pts[i].dy) : path.lineTo(pts[i].dx, pts[i].dy);
+      i == 0
+          ? path.moveTo(pts[i].dx, pts[i].dy)
+          : path.lineTo(pts[i].dx, pts[i].dy);
     }
     canvas.drawPath(
         path,
@@ -606,10 +691,12 @@ class PiePainter extends CustomPainter {
     var start = -math.pi / 2;
     for (final p in parts) {
       final sweep = (p[0] as double) * 2 * math.pi;
-      canvas.drawArc(rect, start, sweep - .03, true, Paint()..color = Color(p[1] as int));
+      canvas.drawArc(
+          rect, start, sweep - .03, true, Paint()..color = Color(p[1] as int));
       start += sweep;
     }
-    canvas.drawCircle(size.center(Offset.zero), size.width * .17, Paint()..color = Colors.white);
+    canvas.drawCircle(size.center(Offset.zero), size.width * .17,
+        Paint()..color = Colors.white);
   }
 
   @override
@@ -628,25 +715,37 @@ class HomeScreen extends StatelessWidget {
     final items = db.items;
 
     // ---- Real KPIs from DB ----
-    final totalRevenue = items.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
-    final totalCost = items.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
+    final totalRevenue =
+        items.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
+    final totalCost =
+        items.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
     final netProfit = totalRevenue - totalCost;
     final totalUnitsSold = items.fold<int>(0, (s, it) => s + it.unitsSold);
-    final profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
+    final profitMargin =
+        totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
 
     // Category breakdown for pie chart
     final catRevenue = <String, double>{};
     for (final it in items) {
-      catRevenue[it.category] = (catRevenue[it.category] ?? 0) + it.price * it.unitsSold;
+      catRevenue[it.category] =
+          (catRevenue[it.category] ?? 0) + it.price * it.unitsSold;
     }
-    final sortedCats = catRevenue.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final sortedCats = catRevenue.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
     final topCats = sortedCats.take(3).toList();
     final totalCatRev = catRevenue.values.fold<double>(0, (s, v) => s + v);
 
     // Top 5 best-selling items for "Latest Orders"
-    final bestSellers = List<StockItem>.from(items)..sort((a, b) => b.unitsSold.compareTo(a.unitsSold));
+    final bestSellers = List<StockItem>.from(items)
+      ..sort((a, b) => b.unitsSold.compareTo(a.unitsSold));
     final topItems = bestSellers.take(5).toList();
-    final tints = [kTintPurple, kTintMint, kTintPeach, kTintBlue, const Color(0xFFE8F1FF)];
+    final tints = [
+      kTintPurple,
+      kTintMint,
+      kTintPeach,
+      kTintBlue,
+      const Color(0xFFE8F1FF)
+    ];
     final icons = [
       Icons.local_fire_department_rounded,
       Icons.trending_up_rounded,
@@ -675,14 +774,19 @@ class HomeScreen extends StatelessWidget {
 
     return NavShell(active: AppScreen.home, go: go, children: [
       AppHeader(go: go, unread: unread),
-      Text.rich(TextSpan(children: [
-        const TextSpan(text: 'Hi, '),
-        TextSpan(
-          text: user?.name ?? 'Shop Owner',
-          style: const TextStyle(color: kPurple, fontWeight: FontWeight.w700),
-        ),
-      ]), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, letterSpacing: -1)),
-      const Text("here's your business overview", style: TextStyle(fontSize: 14)),
+      Text.rich(
+          TextSpan(children: [
+            const TextSpan(text: 'Hi, '),
+            TextSpan(
+              text: user?.name ?? 'Shop Owner',
+              style:
+                  const TextStyle(color: kPurple, fontWeight: FontWeight.w700),
+            ),
+          ]),
+          style: const TextStyle(
+              fontSize: 24, fontWeight: FontWeight.w600, letterSpacing: -1)),
+      const Text("here's your business overview",
+          style: TextStyle(fontSize: 14)),
       const SizedBox(height: 18),
       // ---- Total Revenue Card (tappable → analytics) ----
       GestureDetector(
@@ -692,33 +796,58 @@ class HomeScreen extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(colors: [Color(0xFF5B36E1), Color(0xFFA165EE)]),
-            boxShadow: const [BoxShadow(color: Color(0x307044DA), blurRadius: 26, offset: Offset(0, 12))],
+            gradient: const LinearGradient(
+                colors: [Color(0xFF5B36E1), Color(0xFFA165EE)]),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x307044DA),
+                  blurRadius: 26,
+                  offset: Offset(0, 12))
+            ],
           ),
           child: Row(children: [
             Container(
-              width: 51, height: 44,
+              width: 51,
+              height: 44,
               decoration: BoxDecoration(
-                  color: const Color(0xFFF8B4A3), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFFA75357)),
+                  color: const Color(0xFFF8B4A3),
+                  borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.account_balance_wallet_rounded,
+                  color: Color(0xFFA75357)),
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Total Revenue', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                const SizedBox(height: 4),
-                Row(children: [
-                  Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(formatKES(totalRevenue),
-                      style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)))),
-                  const SizedBox(width: 6),
-                  Pill('$totalUnitsSold sold'),
-                ]),
-                const SizedBox(height: 4),
-                Text('from ${items.length} products', style: const TextStyle(color: Colors.white60, fontSize: 11)),
-              ]),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Total Revenue',
+                        style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Flexible(
+                          child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(formatKES(totalRevenue),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800)))),
+                      const SizedBox(width: 6),
+                      Pill('$totalUnitsSold sold'),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text('from ${items.length} products',
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 11)),
+                  ]),
             ),
             const SizedBox(width: 8),
-            SizedBox(width: 60, height: 56, child: CustomPaint(painter: SparklinePainter(points: sparkPts))),
+            SizedBox(
+                width: 60,
+                height: 56,
+                child:
+                    CustomPaint(painter: SparklinePainter(points: sparkPts))),
           ]),
         ),
       ),
@@ -732,26 +861,41 @@ class HomeScreen extends StatelessWidget {
           decoration: cardDeco(Colors.white),
           child: Row(children: [
             SizedBox(
-              width: 58, height: 58,
-              child: CustomPaint(painter: DBPiePainter(
+              width: 58,
+              height: 58,
+              child: CustomPaint(
+                  painter: DBPiePainter(
                 slices: topCats.isEmpty
                     ? [1.0]
-                    : topCats.map((e) => e.value / (totalCatRev > 0 ? totalCatRev : 1)).toList(),
+                    : topCats
+                        .map((e) =>
+                            e.value / (totalCatRev > 0 ? totalCatRev : 1))
+                        .toList(),
               )),
             ),
             const SizedBox(width: 21),
             Expanded(
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Net Profit', style: TextStyle(fontSize: 12)),
-                const SizedBox(height: 4),
-                Row(children: [
-                  Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(formatKES(netProfit), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)))),
-                  const SizedBox(width: 6),
-                  Pill('${profitMargin.toStringAsFixed(0)}% margin'),
-                ]),
-                const SizedBox(height: 4),
-                Text('cost: ${formatKES(totalCost)}', style: const TextStyle(color: kMuted, fontSize: 11)),
-              ]),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Net Profit', style: TextStyle(fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Flexible(
+                          child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(formatKES(netProfit),
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800)))),
+                      const SizedBox(width: 6),
+                      Pill('${profitMargin.toStringAsFixed(0)}% margin'),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text('cost: ${formatKES(totalCost)}',
+                        style: const TextStyle(color: kMuted, fontSize: 11)),
+                  ]),
             ),
           ]),
         ),
@@ -761,19 +905,40 @@ class HomeScreen extends StatelessWidget {
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: [
-          _quickStat('In Stock', '${items.where((i) => !i.isOutOfStock && !i.isLowStock).length}', const Color(0xFFE1F6F4), const Color(0xFF0F9D85), () => go(AppScreen.stock)),
+          _quickStat(
+              'In Stock',
+              '${items.where((i) => !i.isOutOfStock && !i.isLowStock).length}',
+              const Color(0xFFE1F6F4),
+              const Color(0xFF0F9D85),
+              () => go(AppScreen.stock)),
           const SizedBox(width: 8),
-          _quickStat('Half Sold', '${items.where((i) => i.isHalfSold).length}', const Color(0xFFFEF3C7), const Color(0xFFD97706), () => go(AppScreen.stock)),
+          _quickStat(
+              'Half Sold',
+              '${items.where((i) => i.isHalfSold).length}',
+              const Color(0xFFFEF3C7),
+              const Color(0xFFD97706),
+              () => go(AppScreen.stock)),
           const SizedBox(width: 8),
-          _quickStat('Low Stock', '${items.where((i) => i.isLowStock).length}', const Color(0xFFFFF0DC), const Color(0xFFE65100), () => go(AppScreen.stock)),
+          _quickStat(
+              'Low Stock',
+              '${items.where((i) => i.isLowStock).length}',
+              const Color(0xFFFFF0DC),
+              const Color(0xFFE65100),
+              () => go(AppScreen.stock)),
           const SizedBox(width: 8),
-          _quickStat('Out', '${items.where((i) => i.isOutOfStock).length}', const Color(0xFFFFECEB), const Color(0xFFD32F2F), () => go(AppScreen.stock)),
+          _quickStat(
+              'Out',
+              '${items.where((i) => i.isOutOfStock).length}',
+              const Color(0xFFFFECEB),
+              const Color(0xFFD32F2F),
+              () => go(AppScreen.stock)),
         ]),
       ),
       const SizedBox(height: 25),
       // ---- Top Sellers / Latest Orders ----
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        const Text('Top Sellers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        const Text('Top Sellers',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         OutlinedButton.icon(
           onPressed: () => go(AppScreen.stock),
           icon: const Icon(Icons.arrow_forward_rounded, size: 16),
@@ -794,26 +959,42 @@ class HomeScreen extends StatelessWidget {
             height: 79,
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.symmetric(horizontal: 15),
-            decoration: BoxDecoration(color: tints[i % tints.length], borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: tints[i % tints.length],
+                borderRadius: BorderRadius.circular(18)),
             child: Row(children: [
               Container(
-                width: 52, height: 52,
-                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                child: Icon(icons[i % icons.length], color: const Color(0xFF373448), size: 28),
+                width: 52,
+                height: 52,
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle),
+                child: Icon(icons[i % icons.length],
+                    color: const Color(0xFF373448), size: 28),
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(topItems[i].name, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 3),
-                  Text('KES ${topItems[i].price.toStringAsFixed(0)}',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                ]),
+                child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(topItems[i].name,
+                          style: const TextStyle(fontSize: 11),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 3),
+                      Text('KES ${topItems[i].price.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w800)),
+                    ]),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(color: const Color(0xFF252235), borderRadius: BorderRadius.circular(15)),
-                child: Text('${topItems[i].unitsSold} Sold', style: const TextStyle(color: Colors.white, fontSize: 9)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF252235),
+                    borderRadius: BorderRadius.circular(15)),
+                child: Text('${topItems[i].unitsSold} Sold',
+                    style: const TextStyle(color: Colors.white, fontSize: 9)),
               ),
             ]),
           ),
@@ -821,17 +1002,24 @@ class HomeScreen extends StatelessWidget {
     ]);
   }
 
-  Widget _quickStat(String label, String value, Color bg, Color fg, [VoidCallback? onTap]) {
-    return Expanded(
+  Widget _quickStat(String label, String value, Color bg, Color fg,
+      [VoidCallback? onTap]) {
+    return SizedBox(
+      width: 88,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration:
+              BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
           child: Column(children: [
-            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: fg)),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w900, color: fg)),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: fg)),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.w700, color: fg)),
           ]),
         ),
       ),
@@ -844,7 +1032,13 @@ class DBPiePainter extends CustomPainter {
   final List<double> slices;
   DBPiePainter({required this.slices});
 
-  static const _colors = [0xFF7045E5, 0xFFF2A65E, 0xFFFFD67B, 0xFF4FC3F7, 0xFF81C784];
+  static const _colors = [
+    0xFF7045E5,
+    0xFFF2A65E,
+    0xFFFFD67B,
+    0xFF4FC3F7,
+    0xFF81C784
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -856,7 +1050,8 @@ class DBPiePainter extends CustomPainter {
           Paint()..color = Color(_colors[i % _colors.length]));
       start += sweep;
     }
-    canvas.drawCircle(size.center(Offset.zero), size.width * .17, Paint()..color = Colors.white);
+    canvas.drawCircle(size.center(Offset.zero), size.width * .17,
+        Paint()..color = Colors.white);
   }
 
   @override
@@ -876,7 +1071,13 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String selectedPeriod = 'July 2024';
-  static const periods = ['Today', 'This Week', 'July 2024', 'This Quarter', 'Year 2024'];
+  static const periods = [
+    'Today',
+    'This Week',
+    'July 2024',
+    'This Quarter',
+    'Year 2024'
+  ];
 
   String _fmt(double v) {
     if (v >= 1000000) return 'KES ${(v / 1000000).toStringAsFixed(1)}M';
@@ -902,7 +1103,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Select Reporting Period',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                   IconButton(
                     icon: const Icon(Icons.close_rounded),
                     onPressed: () => Navigator.pop(ctx),
@@ -914,7 +1116,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ListTile(
                   title: Text(p,
                       style: TextStyle(
-                          fontWeight: selectedPeriod == p ? FontWeight.w800 : FontWeight.w600,
+                          fontWeight: selectedPeriod == p
+                              ? FontWeight.w800
+                              : FontWeight.w600,
                           color: selectedPeriod == p ? kBlue : kInk)),
                   trailing: selectedPeriod == p
                       ? const Icon(Icons.check_circle_rounded, color: kBlue)
@@ -950,18 +1154,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: cardDeco(Colors.white),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: const TextStyle(fontSize: 10)),
             const SizedBox(height: 3),
             FittedBox(
-                child: Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+                child: Text(value,
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w800))),
             const SizedBox(height: 7),
             Pill(delta, bg: const Color(0xFFEDF9F3)),
           ]),
         ),
       );
 
-  Widget _chart(List<({String label, double rev, double cost})> bars, double maxVal, double totalRev, double totalCost) {
+  Widget _chart(List<({String label, double rev, double cost})> bars,
+      double maxVal, double totalRev, double totalCost) {
     final yLabels = [
       _fmt(maxVal),
       _fmt(maxVal * 0.8),
@@ -979,20 +1187,32 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SizedBox(
               width: 52,
-              child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (final l in yLabels) Text(l, style: const TextStyle(fontSize: 9, color: Color(0xFF625E70), fontWeight: FontWeight.w600)),
-              ]),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final l in yLabels)
+                      Text(l,
+                          style: const TextStyle(
+                              fontSize: 9,
+                              color: Color(0xFF625E70),
+                              fontWeight: FontWeight.w600)),
+                  ]),
             ),
             Expanded(
-              child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                for (var i = 0; i < 6; i++) const Divider(height: 1, color: Color(0xFFE7E6EF)),
-              ]),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    for (var i = 0; i < 6; i++)
+                      const Divider(height: 1, color: Color(0xFFE7E6EF)),
+                  ]),
             ),
           ]),
         ),
         Positioned.fill(
           left: 54,
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
             for (final b in bars)
               SizedBox(
                 width: 36,
@@ -1001,9 +1221,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     child: Align(
                       alignment: Alignment.bottomCenter,
                       child: FractionallySizedBox(
-                        heightFactor: maxVal > 0 ? ((b.rev + b.cost) / maxVal).clamp(0.08, 1.0) : 0.1,
+                        heightFactor: maxVal > 0
+                            ? ((b.rev + b.cost) / maxVal).clamp(0.08, 1.0)
+                            : 0.1,
                         child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(5)),
                           child: Column(children: [
                             Expanded(
                               flex: math.max(1, (b.cost / 100).round()),
@@ -1021,7 +1244,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ),
                   SizedBox(
                     height: 26,
-                    child: Center(child: Text(b.label, style: const TextStyle(fontSize: 10, color: Color(0xFF625E70), fontWeight: FontWeight.w600))),
+                    child: Center(
+                        child: Text(b.label,
+                            style: const TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF625E70),
+                                fontWeight: FontWeight.w600))),
                   ),
                 ]),
               ),
@@ -1036,7 +1264,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                boxShadow: const [BoxShadow(color: kShadow, blurRadius: 20, offset: Offset(0, 8))]),
+                boxShadow: const [
+                  BoxShadow(
+                      color: kShadow, blurRadius: 20, offset: Offset(0, 8))
+                ]),
             child: Column(children: [
               _legend(const Color(0xFF83D8D8), 'Received', _fmt(totalRev)),
               const SizedBox(height: 8),
@@ -1049,26 +1280,36 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _legend(Color c, String l, String v) => Row(children: [
-        Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+        Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
         const SizedBox(width: 6),
         Text(l, style: const TextStyle(fontSize: 8, color: kMuted)),
         const Spacer(),
-        Text(v, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+        Text(v,
+            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
       ]);
 
-  Widget _insight(IconData icon, String label, String value, Color bg, Color fg, VoidCallback onTap) => GestureDetector(
+  Widget _insight(IconData icon, String label, String value, Color bg, Color fg,
+          VoidCallback onTap) =>
+      GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(16)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          decoration:
+              BoxDecoration(color: bg, borderRadius: BorderRadius.circular(16)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Icon(icon, color: fg, size: 25),
               Icon(Icons.north_east_rounded, color: fg, size: 16),
             ]),
             const Spacer(),
             Text(label, style: TextStyle(fontSize: 9, color: fg)),
-            Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: fg)),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: fg)),
           ]),
         ),
       );
@@ -1079,12 +1320,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final items = db.items;
 
     // Real DB Analytics
-    final totalRevenue = items.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
-    final totalCost = items.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
+    final totalRevenue =
+        items.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
+    final totalCost =
+        items.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
     final netProfit = totalRevenue - totalCost;
     final totalUnitsSold = items.fold<int>(0, (s, it) => s + it.unitsSold);
-    final profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
-    final lowStockCount = items.where((it) => it.isLowStock || it.isOutOfStock).length;
+    final profitMargin =
+        totalRevenue > 0 ? (netProfit / totalRevenue * 100) : 0;
+    final lowStockCount =
+        items.where((it) => it.isLowStock || it.isOutOfStock).length;
     final categories = db.getCategories().where((c) => c != 'All').toList();
 
     // Divide 500 items into 5 segments for the bar chart
@@ -1095,14 +1340,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final start = (i * chunkSize).clamp(0, items.length);
       final end = ((i + 1) * chunkSize).clamp(0, items.length);
       final chunk = items.sublist(start, end);
-      final cRev = chunk.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
-      final cCost = chunk.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
+      final cRev =
+          chunk.fold<double>(0, (s, it) => s + it.price * it.unitsSold);
+      final cCost =
+          chunk.fold<double>(0, (s, it) => s + it.costPrice * it.unitsSold);
       bars.add((label: periodLabels[i], rev: cRev, cost: cCost));
     }
     final maxVal = bars.map((b) => b.rev + b.cost).fold<double>(0, math.max);
 
     return NavShell(active: AppScreen.analytics, go: widget.go, children: [
-      AppHeader(go: widget.go, unread: widget.unread, onBack: () => widget.go(AppScreen.home)),
+      AppHeader(
+          go: widget.go,
+          unread: widget.unread,
+          onBack: () => widget.go(AppScreen.home)),
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         InkWell(
           onTap: _showPeriodPicker,
@@ -1110,24 +1360,32 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Row(children: [
-              Text(selectedPeriod, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              Text(selectedPeriod,
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w700)),
               const SizedBox(width: 4),
               const Icon(Icons.keyboard_arrow_down_rounded, color: kMuted),
             ]),
           ),
         ),
         FilledButton.icon(
-          onPressed: () => _exportReport(totalRevenue, totalCost, totalUnitsSold),
+          onPressed: () =>
+              _exportReport(totalRevenue, totalCost, totalUnitsSold),
           icon: const Icon(Icons.download_rounded, size: 18),
           label: const Text('Export', style: TextStyle(fontSize: 12)),
-          style: FilledButton.styleFrom(backgroundColor: kPurple, shape: const StadiumBorder(), minimumSize: const Size(0, 40)),
+          style: FilledButton.styleFrom(
+              backgroundColor: kPurple,
+              shape: const StadiumBorder(),
+              minimumSize: const Size(0, 40)),
         ),
       ]),
       const SizedBox(height: 15),
       Row(children: [
-        _stat('Total Spent', _fmt(totalCost), '${profitMargin.toStringAsFixed(0)}% profit margin'),
+        _stat('Total Spent', _fmt(totalCost),
+            '${profitMargin.toStringAsFixed(0)}% profit margin'),
         const SizedBox(width: 12),
-        _stat('Total Received', _fmt(totalRevenue), '$totalUnitsSold units sold'),
+        _stat(
+            'Total Received', _fmt(totalRevenue), '$totalUnitsSold units sold'),
       ]),
       const SizedBox(height: 20),
       _chart(bars, maxVal, totalRevenue, totalCost),
@@ -1135,10 +1393,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('Business Insights', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const Text('Business Insights',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           TextButton(
             onPressed: () => widget.go(AppScreen.stock),
-            child: const Text('View All in Stock', style: TextStyle(fontSize: 11, color: kBlue, fontWeight: FontWeight.w700)),
+            child: const Text('View All in Stock',
+                style: TextStyle(
+                    fontSize: 11, color: kBlue, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -1151,10 +1412,34 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         crossAxisSpacing: 11,
         childAspectRatio: 1.5,
         children: [
-          _insight(Icons.shopping_bag_outlined, 'Total Units Sold', '$totalUnitsSold Units', kTintPurple, const Color(0xFF573C9D), () => widget.go(AppScreen.stock)),
-          _insight(Icons.inventory_2_outlined, 'Catalog Products', '${items.length} Items', const Color(0xFFDFF6F4), const Color(0xFF246A70), () => widget.go(AppScreen.stock)),
-          _insight(Icons.category_outlined, 'Active Categories', '${categories.length} Categories', const Color(0xFFFFEAD7), const Color(0xFF815735), () => widget.go(AppScreen.stock)),
-          _insight(Icons.warning_amber_rounded, 'Restock Alerts', '$lowStockCount Need Stock', kTintBlue, const Color(0xFF326083), () => widget.go(AppScreen.stock)),
+          _insight(
+              Icons.shopping_bag_outlined,
+              'Total Units Sold',
+              '$totalUnitsSold Units',
+              kTintPurple,
+              const Color(0xFF573C9D),
+              () => widget.go(AppScreen.stock)),
+          _insight(
+              Icons.inventory_2_outlined,
+              'Catalog Products',
+              '${items.length} Items',
+              const Color(0xFFDFF6F4),
+              const Color(0xFF246A70),
+              () => widget.go(AppScreen.stock)),
+          _insight(
+              Icons.category_outlined,
+              'Active Categories',
+              '${categories.length} Categories',
+              const Color(0xFFFFEAD7),
+              const Color(0xFF815735),
+              () => widget.go(AppScreen.stock)),
+          _insight(
+              Icons.warning_amber_rounded,
+              'Restock Alerts',
+              '$lowStockCount Need Stock',
+              kTintBlue,
+              const Color(0xFF326083),
+              () => widget.go(AppScreen.stock)),
         ],
       ),
     ]);
@@ -1164,7 +1449,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 // ---------- Profile ----------
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, required this.go, required this.unread, required this.onLogout});
+  const ProfileScreen(
+      {super.key,
+      required this.go,
+      required this.unread,
+      required this.onLogout});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback onLogout;
@@ -1174,6 +1463,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  bool _referralExpanded = false;
+
   final prefs = <String, bool>{
     'Biometric login': true,
     'Push notifications': true,
@@ -1186,7 +1477,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Weekly email report': 'Summary every Monday',
   };
 
-  Widget _row(IconData icon, Color bg, Color fg, String label, VoidCallback onTap, {int count = 0}) {
+  Widget _row(
+      IconData icon, Color bg, Color fg, String label, VoidCallback onTap,
+      {int count = 0}) {
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -1202,13 +1495,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Icon(icon, color: fg, size: 20),
           ),
           const SizedBox(width: 14),
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kInk))),
+          Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: kInk))),
           if (count > 0) Pill('$count new', bg: kTintPurple, fg: kPurple),
           const SizedBox(width: 6),
-          const Icon(Icons.arrow_forward_rounded, size: 18, color: Color(0xFFB0ADC0)),
+          const Icon(Icons.arrow_forward_rounded,
+              size: 18, color: Color(0xFFB0ADC0)),
         ]),
       ),
     );
+  }
+
+  Future<void> _shareReferralLink(
+      String referralLink, BuildContext shareContext) async {
+    final renderObject = shareContext.findRenderObject();
+    final messenger = ScaffoldMessenger.of(context);
+    final sharePositionOrigin =
+        renderObject is RenderBox && renderObject.hasSize
+            ? renderObject.localToGlobal(Offset.zero) & renderObject.size
+            : null;
+
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          title: 'Invite to JengaBiz',
+          text:
+              'Grow your shop with JengaBiz. Join using my invite link: $referralLink',
+          sharePositionOrigin: sharePositionOrigin,
+        ),
+      );
+    } catch (_) {
+      if (!mounted || !messenger.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content:
+              Text('Unable to open sharing options. Copy the link instead.'),
+        ),
+      );
+    }
   }
 
   @override
@@ -1216,10 +1542,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = JengaDB.instance.currentUser;
     final items = JengaDB.instance.items;
     final totalSold = items.fold<int>(0, (s, it) => s + it.unitsSold);
-    final emailPrefix = (user?.email.isNotEmpty == true && user!.email.contains('@'))
-        ? user.email.split('@')[0]
-        : 'duka';
-    final referralLink = 'https://jengabiz.co.ke/join?ref=$emailPrefix';
+    final emailPrefix =
+        (user?.email.isNotEmpty == true && user!.email.contains('@'))
+            ? user.email.split('@')[0]
+            : 'duka';
+    final referralLink = Uri.https(
+      'jengabiz.mftechnologies.org',
+      '/',
+      {'ref': emailPrefix},
+    ).toString();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 32),
@@ -1227,8 +1558,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         // Top Navigation Bar
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            RoundBtn(icon: Icons.arrow_back_rounded, onTap: () => widget.go(AppScreen.home)),
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            RoundBtn(
+                icon: Icons.arrow_back_rounded,
+                onTap: () => widget.go(AppScreen.home)),
             RoundBtn(
               icon: Icons.notifications_none_rounded,
               badge: widget.unread,
@@ -1249,7 +1583,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Center(
                 child: Text(
                   user?.name ?? 'Shop Owner',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kInk),
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w700, color: kInk),
                 ),
               ),
               Center(
@@ -1279,20 +1614,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Row(
             children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Total Units Sold', style: TextStyle(fontSize: 11, color: kMuted, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text('$totalSold', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: kInk)),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Total Units Sold',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: kMuted,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('$totalSold',
+                          style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: kInk)),
+                    ]),
               ),
               Container(width: 1, height: 38, color: const Color(0xFFECEEF5)),
               const SizedBox(width: 20),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Stock Catalog', style: TextStyle(fontSize: 11, color: kMuted, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text('${items.length} Items', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: kInk)),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Stock Catalog',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: kMuted,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('${items.length} Items',
+                          style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: kInk)),
+                    ]),
               ),
             ],
           ),
@@ -1336,7 +1691,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 18),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text('Preferences', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: kMuted)),
+          child: Text('Preferences',
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w700, color: kMuted)),
         ),
 
         // Preferences Container (Full-width, edge-to-edge)
@@ -1350,8 +1707,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                 value: prefs['Biometric login'] ?? true,
                 activeColor: kBlue,
-                title: const Text('Biometric login (Fingerprint & Face ID)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                subtitle: const Text('Quick unlock with Face ID or fingerprint', style: TextStyle(fontSize: 11, color: kMuted)),
+                title: const Text('Biometric login (Fingerprint & Face ID)',
+                    style:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                subtitle: const Text('Quick unlock with Face ID or fingerprint',
+                    style: TextStyle(fontSize: 11, color: kMuted)),
                 onChanged: (v) => setState(() => prefs['Biometric login'] = v),
               ),
               const Divider(height: 1, indent: 16, color: Color(0xFFF1F3F9)),
@@ -1363,129 +1723,138 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     value: e.value,
                     activeColor: kBlue,
-                    title: Text(e.key, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                    subtitle: Text(subs[e.key] ?? '', style: const TextStyle(fontSize: 11, color: kMuted)),
+                    title: Text(e.key,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    subtitle: Text(subs[e.key] ?? '',
+                        style: const TextStyle(fontSize: 11, color: kMuted)),
                     onChanged: (v) => setState(() => prefs[e.key] = v),
                   ),
-                  const Divider(height: 1, indent: 16, color: Color(0xFFF1F3F9)),
+                  const Divider(
+                      height: 1, indent: 16, color: Color(0xFFF1F3F9)),
                 ],
 
-              // Refer & Earn Preference Section (No code, only link to earn KES 100, share to WhatsApp, X, Twitter, Email)
+              // Refer & Earn stays collapsed until the user opens it.
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Refer & Earn (KES 100)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                              SizedBox(height: 2),
-                              Text('Share your invite link to earn KES 100 per verified duka', style: TextStyle(fontSize: 11, color: kMuted)),
-                            ],
-                          ),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => setState(
+                          () => _referralExpanded = !_referralExpanded),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Refer & Earn (KES 100)',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700)),
+                                  SizedBox(height: 2),
+                                  Text(
+                                      'Share your invite link to earn KES 100 per verified duka',
+                                      style: TextStyle(
+                                          fontSize: 11, color: kMuted)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE8F1FF),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('Earn KES 100',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: kBlue)),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              _referralExpanded
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              color: kMuted,
+                            ),
+                          ],
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F1FF),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text('Earn KES 100', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: kBlue)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF6F8FD),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFE2E8F4)),
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.link_rounded, size: 16, color: kBlue),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              referralLink,
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
-                              overflow: TextOverflow.ellipsis,
+                    ),
+                    if (_referralExpanded) ...[
+                      const SizedBox(height: 12),
+                      Builder(
+                        builder: (shareContext) => Material(
+                          color: const Color(0xFFF6F8FD),
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () =>
+                                _shareReferralLink(referralLink, shareContext),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: const Color(0xFFE2E8F4)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.share_rounded,
+                                      size: 16, color: kBlue),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      referralLink,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF374151)),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.copy_rounded,
+                                        size: 16, color: kBlue),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Copy link',
+                                    onPressed: () async {
+                                      final messenger =
+                                          ScaffoldMessenger.of(context);
+                                      await Clipboard.setData(
+                                          ClipboardData(text: referralLink));
+                                      if (!mounted || !messenger.mounted) {
+                                        return;
+                                      }
+                                      messenger.showSnackBar(
+                                        const SnackBar(
+                                            content:
+                                                Text('Invite link copied')),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.copy_rounded, size: 16, color: kBlue),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            tooltip: 'Copy Link',
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Invite link copied: $referralLink'),
-                                  backgroundColor: kBlue,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _shareChip(
-                            icon: Icons.chat_bubble_outline_rounded,
-                            label: 'WhatsApp',
-                            color: const Color(0xFF25D366),
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Sharing invite link via WhatsApp: $referralLink'),
-                                  backgroundColor: const Color(0xFF25D366),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _shareChip(
-                            icon: Icons.alternate_email_rounded,
-                            label: 'X (Twitter)',
-                            color: const Color(0xFF1DA1F2),
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Sharing invite link via X (Twitter): $referralLink'),
-                                  backgroundColor: const Color(0xFF1DA1F2),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _shareChip(
-                            icon: Icons.mail_outline_rounded,
-                            label: 'Email',
-                            color: const Color(0xFFEA4335),
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Sharing invite link via Email: $referralLink'),
-                                  backgroundColor: const Color(0xFFEA4335),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Tap the link to share it with an app, or use the copy button.',
+                        style: TextStyle(fontSize: 11, color: kMuted),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1505,47 +1874,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 backgroundColor: const Color(0xFFFFF5F6),
                 foregroundColor: const Color(0xFFD23B52),
                 side: const BorderSide(color: Color(0xFFF0C6CC)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text('Log out', style: TextStyle(fontWeight: FontWeight.w700)),
+              child: const Text('Log out',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _shareChip({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

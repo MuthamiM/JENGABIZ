@@ -8,7 +8,9 @@ The JENGABIZ backend is built on **C# ASP.NET Core 8.0** with **Entity Framework
 
 | Environment | Base URL |
 | :--- | :--- |
-| **Local Host / Browser** | `http://localhost:5080` |
+| **Public Landing Page** | `https://jengabiz.mftechnologies.org` |
+| **Production API** | `https://jengabiz-api.mftechnologies.org` |
+| **Local Host / API** | `http://localhost:5080` |
 | **Swagger Interactive UI** | `http://localhost:5080/swagger` |
 | **Swagger OpenAPI JSON** | `http://localhost:5080/swagger/v1/swagger.json` |
 | **Android Emulator** | `http://10.0.2.2:5080` |
@@ -19,10 +21,15 @@ The JENGABIZ backend is built on **C# ASP.NET Core 8.0** with **Entity Framework
 
 ## 2. Docker Architecture
 
-The service is composed via `docker-compose.yml`:
+The services are composed via `docker-compose.yml`:
 - **`jengabiz-api`**: C# .NET 8 Web API container exposed on port `5080`.
+- **`jengabiz-email-otp`**: Email verification service exposed only on host loopback port `5081`.
+- **`jengabiz-landing`**: Static landing page exposed only on host loopback port `5082`.
 - **`jengabiz-redis`**: Redis 7 Alpine cache container exposed on port `6380` (internal `6379`).
-- **Database**: SQLite file stored at `/app/data/duka_ledger.db` mounted to named Docker volume `jengabiz_db_data`.
+- **Business API database**: SQLite file stored at `/app/data/duka_ledger.db` in named Docker volume `jengabiz_db_data`.
+- **JengaBiz mobile account database**: SQLite file stored at `/data/jengabiz.sqlite` in named Docker volume `jengabiz_account_data`. It stores mobile account profiles, salted password hashes, sessions, and each account's stock items.
+
+Cloudflare Tunnel sends the public landing hostname to port `5082`, sends `/email-auth/*` on the API hostname to port `5081`, and sends all other API paths to port `5080`. Keeping mobile account and stock paths under `/email-auth/` uses the existing tunnel route.
 
 To start or restart the stack:
 ```bash
@@ -54,38 +61,67 @@ JengaBiz uses a **Cache-Aside Pattern**:
 
 ### Authentication
 
-#### `POST /auth/request-otp`
-Requests a 4-digit one-time password for phone authentication.
+#### `POST /email-auth/request-otp`
+Sends a 6-digit, single-use account verification code to the supplied email address. Codes expire after 10 minutes. Resend is limited to once per minute and five sends per hour per address.
 - **Request Body**:
   ```json
   {
-    "phone": "+254712345678"
+    "email": "owner@example.com"
   }
   ```
 - **Response `200 OK`**:
   ```json
   {
     "success": true,
-    "message": "OTP sent to +254712345678"
+    "message": "A verification code was sent to your email address."
   }
   ```
 
-#### `POST /auth/verify-otp`
-Verifies OTP and returns a JWT Bearer token.
+#### `POST /email-auth/verify-otp`
+Verifies and consumes the latest email code. A successful response includes a short-lived, single-use `verificationToken` for account registration or recovery migration. It is not an API session.
 - **Request Body**:
   ```json
   {
-    "phone": "+254712345678",
-    "otp": "1234"
+    "email": "owner@example.com",
+    "otp": "123456"
   }
   ```
 - **Response `200 OK`**:
   ```json
   {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "shopId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    "success": true,
+    "verified": true,
+    "verificationToken": "<single-use-token>"
   }
   ```
+
+Incorrect or expired codes return `400`; resend limits return `429`; missing server-side email configuration returns `503`. The email service uses Resend credentials from the host environment and does not include a mail API key in the Flutter app.
+
+#### `POST /email-auth/register` and `POST /email-auth/migrate`
+Creates a mobile account after email verification. Migration is for an account previously saved only on the phone. Both endpoints require the verification token and create the account and initial stock in one SQLite transaction. An existing email returns `409` without overwriting its account or stock.
+
+```json
+{
+  "email": "owner@example.com",
+  "verificationToken": "<single-use-token>",
+  "name": "Shop Owner",
+  "shopName": "My Shop",
+  "phone": "",
+  "password": "<password>",
+  "items": []
+}
+```
+
+Successful responses return a bearer `sessionToken` and a profile without password data. Passwords are hashed server-side with scrypt and per-account random salts; account ownership is bound to the authenticated session.
+
+#### `POST /email-auth/login`
+Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response.
+
+#### `GET /email-auth/stock/items` and `PUT /email-auth/stock/items`
+Both routes require `Authorization: Bearer <sessionToken>`. GET returns only the signed-in account's inventory. PUT replaces that account's inventory in one database transaction. Payloads are capped and validated before writing.
+
+#### `POST /email-auth/logout`
+Revokes the current bearer session.
 
 ---
 

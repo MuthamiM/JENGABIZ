@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f9ff" />
+    <meta
+      name="description"
+      content="JengaBiz helps shop owners keep track of stock, sales, and daily business performance."
+    />
+    <title>JengaBiz — Keep your shop moving</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, Manrope, "Segoe UI", sans-serif;
+        color: #17162a;
+        background: #f8f9ff;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        --blue: #1e6bff;
+        --ink: #17162a;
+        --muted: #68677b;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      a { color: inherit; text-decoration: none; }
+      .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+      .nav { display: flex; align-items: center; justify-content: space-between; min-height: 82px; }
+      .brand { display: inline-flex; align-items: center; gap: 11px; font-size: 19px; font-weight: 850; letter-spacing: -.04em; }
+      .brand img { width: 38px; height: 38px; object-fit: contain; }
+      .nav-links { display: flex; align-items: center; gap: 29px; color: #5d5c70; font-size: 14px; font-weight: 650; }
+      .nav-links a:hover, .footer a:hover { color: var(--blue); }
+      .button { display: inline-flex; min-height: 48px; padding: 0 21px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 15px; background: var(--blue); color: white; font-size: 14px; font-weight: 750; box-shadow: 0 10px 24px #1e6bff2b; transition: transform .18s ease, box-shadow .18s ease; }
+      .button:hover { transform: translateY(-2px); box-shadow: 0 14px 28px #1e6bff38; }
+      .button.secondary { background: white; border-color: #e4e8f5; box-shadow: none; color: var(--ink); }
+      .hero { padding: 62px 0 76px; overflow: hidden; background: radial-gradient(ellipse at 76% 32%, #e7eeff 0, #f2f5ff 35%, #f8f9ff 72%); }
+      .hero-grid { display: grid; grid-template-columns: 1.02fr .98fr; align-items: center; gap: 44px; }
+      .eyebrow { display: inline-flex; align-items: center; gap: 9px; margin: 0 0 20px; color: #4e5f95; font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+      .eyebrow::before { width: 8px; height: 8px; border-radius: 50%; background: #54c5a4; content: ""; }
+      h1 { max-width: 610px; margin: 0; font-size: clamp(42px, 6vw, 68px); line-height: 1.04; letter-spacing: -.065em; }
+      h1 span { color: var(--blue); }
+      .hero-copy { max-width: 500px; margin: 21px 0 28px; color: var(--muted); font-size: 17px; line-height: 1.75; }
+      .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+      .download-note { margin: 12px 0 0; color: #74768d; font-size: 12px; line-height: 1.6; }
+      .hero-note { margin-top: 24px; color: #868599; font-size: 12px; }
+      .hero-visual { position: relative; min-height: 440px; display: grid; place-items: center; }
+      .visual-glow { position: absolute; width: min(480px, 90%); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, #d6e2ff 0, #e7edff 51%, #e7edff00 72%); }
+      .hero-image { position: relative; width: min(100%, 520px); max-height: 470px; object-fit: contain; filter: drop-shadow(0 30px 32px #283d7026); }
+      .float-card { position: absolute; right: -4px; bottom: 45px; display: flex; align-items: center; gap: 12px; padding: 15px 18px; border: 1px solid #edf0f8; border-radius: 17px; background: #ffffffed; box-shadow: 0 18px 46px #283d701c; }
+      .float-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 13px; background: #e1f6f0; color: #1b9a79; font-size: 20px; }
+      .float-card strong { display: block; font-size: 13px; }
+      .float-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+      .section { padding: 82px 0; }
+      .section-heading { max-width: 650px; margin: 0 auto 38px; text-align: center; }
+      .section-heading p { margin: 0 0 12px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+      h2 { margin: 0; font-size: clamp(30px, 4vw, 43px); line-height: 1.15; letter-spacing: -.05em; }
+      .section-heading span { display: block; margin-top: 13px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+      .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      .feature { min-height: 220px; padding: 27px; border: 1px solid #e9ecf6; border-radius: 22px; background: white; box-shadow: 0 12px 30px #26335a08; }
+      .feature-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 22px; border-radius: 16px; background: #e7efff; color: var(--blue); font-size: 23px; }
+      .feature:nth-child(2) .feature-icon { background: #e1f6f0; color: #20987b; }
+      .feature:nth-child(3) .feature-icon { background: #fff1dd; color: #d28a22; }
+      .feature h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: -.025em; }
+      .feature p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+      .band { padding: 54px 0; background: #171d39; color: white; }
+      .band-inner { display: flex; align-items: center; justify-content: space-between; gap: 28px; }
+      .band h2 { max-width: 600px; font-size: clamp(27px, 4vw, 38px); }
+      .band p { max-width: 560px; margin: 11px 0 0; color: #c5c9db; line-height: 1.7; }
+      .band .button { flex: 0 0 auto; }
+      .band-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+      .footer { padding: 28px 0; color: #77768b; font-size: 12px; }
+      .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+      .footer .brand { color: var(--ink); font-size: 15px; }
+      .footer .brand img { width: 30px; height: 30px; }
+      .footer-links { display: flex; flex-wrap: wrap; gap: 20px; }
+      @media (max-width: 780px) {
+        .wrap { width: min(100% - 32px, 560px); }
+        .nav { min-height: 70px; }
+        .nav-links { gap: 16px; }
+        .nav-links .button { min-height: 42px; padding: 0 14px; }
+        .nav-links a:not(.button) { display: none; }
+        .hero { padding: 42px 0 54px; }
+        .hero-grid { grid-template-columns: 1fr; gap: 8px; }
+        .hero-copy { font-size: 15px; }
+        .hero-visual { min-height: 310px; }
+        .hero-image { max-height: 340px; }
+        .float-card { right: 0; bottom: 15px; }
+        .section { padding: 62px 0; }
+        .features { grid-template-columns: 1fr; }
+        .feature { min-height: 0; }
+        .band-inner { align-items: flex-start; flex-direction: column; }
+      }
+      @media (max-width: 430px) {
+        .brand { font-size: 17px; }
+        h1 { font-size: 44px; }
+        .hero-actions .button { width: 100%; }
+        .footer-inner { align-items: flex-start; flex-direction: column; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="wrap nav">
+      <a class="brand" href="#top" aria-label="JengaBiz home">
+        <img src="/assets/jengabiz_mark.png" alt="" />
+        <span>JengaBiz</span>
+      </a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#features">What you can do</a>
+        <a href="https://mftechnologies.org" target="_blank" rel="noreferrer">About MF Technologies</a>
+        <a class="button" href="#get-started">Get started</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div>
+            <p class="eyebrow">Built for everyday shopkeeping</p>
+            <h1>Keep your shop <span>moving.</span></h1>
+            <p class="hero-copy">Know what is in stock, what has sold, and how your business is doing. JengaBiz brings the daily picture of your shop into one simple place.</p>
+            <div class="hero-actions">
+              <a class="button" href="/downloads/v1.0.1/JengaBiz-1.0.1.apk" download="JengaBiz-1.0.1.apk">Download for Android</a>
+              <a class="button secondary" href="#features">Explore JengaBiz</a>
+            </div>
+            <p class="download-note">Android release 1.0.1 · APK · <a href="/downloads/v1.0.1/JengaBiz-1.0.1.sha256">Verify the download</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/download/v1.0.1/jengabiz-android-1.0.1.apk" target="_blank" rel="noreferrer">GitHub APK mirror</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/tag/v1.0.1" target="_blank" rel="noreferrer">Release notes</a></p>
+            <p class="hero-note">Simple tools for shop owners. Clear records for every day.</p>
+          </div>
+          <div class="hero-visual" aria-label="JengaBiz shop management illustration">
+            <div class="visual-glow" aria-hidden="true"></div>
+            <img class="hero-image" src="/assets/duka-growth-hero.png" alt="Illustration of a shop owner reviewing business performance" />
+            <div class="float-card">
+              <span class="float-icon" aria-hidden="true">↗</span>
+              <span><strong>See your progress</strong><small>Stock and sales, together</small></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="wrap">
+          <div class="section-heading">
+            <p>Stay in control</p>
+            <h2>Everything you need for a clearer shop day.</h2>
+            <span>Spend less time searching through notebooks and more time serving customers.</span>
+          </div>
+          <div class="features">
+            <article class="feature">
+              <div class="feature-icon" aria-hidden="true">▦</div>
+              <h3>Keep stock visible</h3>
+              <p>Record products, check quantities, and spot items that need to be restocked.</p>
+            </article>
+            <article class="feature">
+              <div class="feature-icon" aria-hidden="true">↗</div>
+              <h3>Track sales as you go</h3>
+              <p>Keep a simple record of daily sales and see how your shop is performing.</p>
+            </article>
+            <article class="feature">
+              <div class="feature-icon" aria-hidden="true">◷</div>
+              <h3>Make informed decisions</h3>
+              <p>Bring your shop activity together so it is easier to review the numbers and plan ahead.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="get-started">
+        <div class="wrap band-inner">
+          <div>
+            <h2>Build a stronger picture of your business.</h2>
+            <p>JengaBiz is made by MF Technologies to help local businesses manage the details that keep a shop moving.</p>
+          </div>
+          <div class="band-actions">
+            <a class="button" href="/downloads/v1.0.1/JengaBiz-1.0.1.apk" download="JengaBiz-1.0.1.apk">Download JengaBiz</a>
+            <a class="button secondary" href="https://mftechnologies.org" target="_blank" rel="noreferrer">Learn about MF Technologies</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <a class="brand" href="#top">
+          <img src="/assets/jengabiz_mark.png" alt="" />
+          <span>JengaBiz</span>
+        </a>
+        <span>© 2026 MF Technologies</span>
+        <div class="footer-links">
+          <a href="https://mftechnologies.org" target="_blank" rel="noreferrer">MF Technologies</a>
+          <a href="https://mftechnologies.org" target="_blank" rel="noreferrer">Contact</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

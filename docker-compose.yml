@@ -34,7 +34,47 @@ services:
     volumes:
       - jengabiz_db_data:/app/data
 
+  jengabiz-email-otp:
+    image: node:24-alpine
+    container_name: jengabiz-email-otp
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.mjs"]
+    ports:
+      - "127.0.0.1:5081:5081"
+    environment:
+      - PORT=5081
+      - DATABASE_PATH=/data/jengabiz.sqlite
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-}
+      - OTP_HASH_SECRET=${JENGABIZ_OTP_HASH_SECRET:-}
+    volumes:
+      - ./backend/email-otp:/app:ro
+      - jengabiz_account_data:/data
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:5081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  jengabiz-landing:
+    image: nginx:alpine
+    container_name: jengabiz-landing
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5082:80"
+    volumes:
+      - ./landing:/usr/share/nginx/html:ro
+      - ./deployment/nginx/jengabiz-landing.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
 volumes:
   jengabiz_redis_data:
   jengabiz_db_data:
+  jengabiz_account_data:
 

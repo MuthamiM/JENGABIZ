@@ -233,9 +233,7 @@ class _StockScreenState extends State<StockScreen> {
             ),
             Text(
               '${allItems.length} Total Products in Catalog',
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF777487)),
+              style: const TextStyle(fontSize: 11, color: Color(0xFF777487)),
             ),
           ],
         ),
@@ -280,23 +278,14 @@ class _StockScreenState extends State<StockScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _statBadge(
-                      'Total Items',
-                      '${allItems.length}',
-                      const Color(0xFFE8EEF8),
-                      kBlue),
+                  _statBadge('Total Items', '${allItems.length}',
+                      const Color(0xFFE8EEF8), kBlue),
                   const SizedBox(width: 8),
-                  _statBadge(
-                      'Units Sold',
-                      '$totalSold',
-                      const Color(0xFFE1F6F4),
-                      const Color(0xFF0F9D85)),
+                  _statBadge('Units Sold', '$totalSold',
+                      const Color(0xFFE1F6F4), const Color(0xFF0F9D85)),
                   const SizedBox(width: 8),
-                  _statBadge(
-                      'Half Sold (50%+)',
-                      '$halfSoldCount',
-                      const Color(0xFFFEF3C7),
-                      const Color(0xFFD97706)),
+                  _statBadge('Half Sold (50%+)', '$halfSoldCount',
+                      const Color(0xFFFEF3C7), const Color(0xFFD97706)),
                   const SizedBox(width: 8),
                   _statBadge(
                     'Low Stock',
@@ -349,8 +338,7 @@ class _StockScreenState extends State<StockScreen> {
                             : null,
                         hintText: 'Search 500+ items or SKU...',
                         hintStyle: const TextStyle(
-                            color: Color(0xFFB0ADC0),
-                            fontSize: 13),
+                            color: Color(0xFFB0ADC0), fontSize: 13),
                         border: InputBorder.none,
                         contentPadding:
                             const EdgeInsets.symmetric(vertical: 12),
@@ -414,15 +402,11 @@ class _StockScreenState extends State<StockScreen> {
                     labelStyle: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: active
-                          ? Colors.white
-                          : const Color(0xFF555268),
+                      color: active ? Colors.white : const Color(0xFF555268),
                     ),
                     shape: StadiumBorder(
                       side: BorderSide(
-                        color: active
-                            ? kBlue
-                            : const Color(0xFFE4E6F0),
+                        color: active ? kBlue : const Color(0xFFE4E6F0),
                       ),
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -474,19 +458,30 @@ class _StockScreenState extends State<StockScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Showing ${displayed.length} of ${allItems.length} items',
-                  style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF706C81)),
+                Expanded(
+                  child: Text(
+                    'Showing ${displayed.length} of ${allItems.length} items',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF706C81)),
+                  ),
                 ),
-                Text(
-                  _sortLabel,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w600, color: kBlue),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _sortLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: kBlue),
+                  ),
                 ),
               ],
             ),
@@ -552,7 +547,8 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Widget _statBadge(String label, String value, Color bg, Color fg) {
-    return Expanded(
+    return SizedBox(
+      width: 126,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
         decoration:
@@ -691,51 +687,45 @@ class _StockScreenState extends State<StockScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    // Stock badge & Half Sold alert badge
-                    Wrap(
-                      spacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: statusColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            statusText,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              color: statusColor,
-                            ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        statusText,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                    if (item.isHalfSold)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: Text(
+                          '${item.soldPercentage}% Sold',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFB45309),
                           ),
                         ),
-                        if (item.isHalfSold)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFEF3C7),
-                              borderRadius: BorderRadius.circular(6),
-                              border:
-                                  Border.all(color: const Color(0xFFFDE68A)),
-                            ),
-                            child: Text(
-                              '${item.soldPercentage}% Sold',
-                              style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFFB45309),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+                      ),
                     Text(
                       'Sold: ${item.unitsSold}',
                       style: const TextStyle(

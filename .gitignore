@@ -7,6 +7,7 @@ dist/
 build/
 .cache/
 .env*
+!**/resend.env.example
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo
@@ -32,6 +33,7 @@ logs/
 **/android/.gradle/
 **/android/local.properties
 **/android/app/build/
+/flutter_app/android/key.properties
 
 # Secrets — NEVER commit API keys or credentials
 flutter_app/lib/config/secrets.dart

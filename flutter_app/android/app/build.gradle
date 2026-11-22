@@ -5,6 +5,15 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def signingPropertiesFile = rootProject.file("key.properties")
+def signingProperties = new Properties()
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+def releaseRequested = gradle.startParameter.taskNames.any {
+    it.toLowerCase().contains("release")
+}
+
 android {
     namespace = "com.dukaledger.duka_ledger"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +39,26 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            if (signingPropertiesFile.exists()) {
+                storeFile rootProject.file(signingProperties["storeFile"])
+                storePassword signingProperties["storePassword"]
+                keyAlias signingProperties["keyAlias"]
+                keyPassword signingProperties["keyPassword"]
+            } else if (releaseRequested) {
+                throw new GradleException(
+                    "Release signing is not configured. Restore flutter_app/android/key.properties and its keystore."
+                )
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            signingConfig = signingPropertiesFile.exists()
+                ? signingConfigs.release
+                : signingConfigs.debug
         }
     }
 }
