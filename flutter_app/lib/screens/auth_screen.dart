@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import '../services/db_service.dart';
 import '../services/api_service.dart';
+import '../services/firebase_push_service.dart';
 import '../services/location_biometric_service.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -22,12 +24,14 @@ class _AuthScreenState extends State<AuthScreen> {
   final _nameCtrl = TextEditingController();
   final _shopCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _referralCodeCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
 
   bool _loading = false;
   bool _canUseBiometrics = false;
+  String? _detectedReferralCounty;
   String? _error;
 
   @override
@@ -53,6 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _nameCtrl.dispose();
     _shopCtrl.dispose();
     _phoneCtrl.dispose();
+    _referralCodeCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _otpCtrl.dispose();
@@ -71,7 +76,6 @@ class _AuthScreenState extends State<AuthScreen> {
         throw const FormatException(
             'Enter your name and shop name to continue.');
       }
-
       final email = _emailCtrl.text.trim();
       final password = _passwordCtrl.text;
       if (email.isEmpty || !email.contains('@')) {
@@ -153,6 +157,24 @@ class _AuthScreenState extends State<AuthScreen> {
         );
       }
 
+      if (isSignUp && _referralCodeCtrl.text.trim().isNotEmpty) {
+        final location =
+            await LocationBiometricService.instance.detectReferralLocation();
+        if (location == null) {
+          throw const FormatException(
+            'Turn on Location and allow access to detect your county for this referral.',
+          );
+        }
+        if (location.countryCode != 'KE') {
+          throw const FormatException(
+            'JengaBiz referrals are currently available in Kenya only.',
+          );
+        }
+        _detectedReferralCounty = location.county;
+      } else {
+        _detectedReferralCounty = null;
+      }
+
       await _requestEmailCode(email);
     } catch (e) {
       if (mounted) {
@@ -200,6 +222,7 @@ class _AuthScreenState extends State<AuthScreen> {
       profile: Map<String, dynamic>.from(profile),
       password: password,
     );
+    unawaited(FirebasePushService.instance.initialize());
     return JengaDB.instance.syncStockWithServer();
   }
 
@@ -253,6 +276,9 @@ class _AuthScreenState extends State<AuthScreen> {
         name: profileName,
         shopName: profileShop,
         phone: profilePhone,
+        county: isSignUp ? _detectedReferralCounty ?? '' : '',
+        referralCode:
+            isSignUp ? _referralCodeCtrl.text.trim().toUpperCase() : '',
         password: _passwordCtrl.text,
         items: migrationItems,
         migrate: _needsAccountMigration,
@@ -397,6 +423,7 @@ class _AuthScreenState extends State<AuthScreen> {
         'Use JengaBiz only for lawful business purposes and only enter information you are authorized to manage. Do not attempt to disrupt the service, access another person’s account, or misuse verification codes.',
         'You own the business information you enter. You are responsible for checking your entries and maintaining any backup you need, especially before changing devices or clearing app data.',
         'Sales totals, stock summaries, and other calculations are recordkeeping aids. Review them against your source documents before making financial, tax, legal, or purchasing decisions; JengaBiz does not provide professional advice.',
+        'JengaBiz referral points are available in Kenya only. A new account that enters a valid referral code and verifies its email can award 50 points when both shops are in the same county, or 75 points when they are in different counties. Each new account can count once. Redemption is not available yet.',
         'Some features need an internet connection and may be unavailable during maintenance, provider outages, or network interruptions. You are responsible for compatible devices and data charges.',
         'JengaBiz and its design, name, and software remain protected by applicable intellectual property rights. You may use the app for your own business while following these terms.',
         'We may restrict access when needed to protect accounts, users, or the service, including when there is suspected fraud, abuse, or a security risk. You may stop using the app at any time.',
@@ -411,6 +438,7 @@ class _AuthScreenState extends State<AuthScreen> {
         'Location access is optional. If you allow it, the app uses your location to estimate the nearest supply hub. You can deny or revoke location access in your device settings.',
         'Fingerprint or face authentication is handled by your device operating system. JengaBiz receives only the success or failure result; the app does not receive or store your fingerprint or face data.',
         'We use account and business information to provide app features, verify email ownership, protect accounts, and respond to support requests. We do not sell your personal information.',
+        'If you use Refer & Earn, JengaBiz uses your phone location and the device geocoder to detect whether you are in Kenya and identify your county. GPS coordinates are not sent to JengaBiz; the JengaBiz service receives the detected country code and county needed to apply the referral rules.',
         'Information may be processed by infrastructure and email providers that help operate the service. They receive only the information needed to provide their service and protect it.',
         'Changes made offline remain on that device until they sync. If the device is lost, the app is removed, or its storage is cleared before sync, those pending changes may be lost. Contact MF Technologies for account or data support.',
         'We use reasonable safeguards, including encrypted network connections for public services and salted password hashing. No device or online service can be guaranteed completely secure, so keep your device locked and do not share verification codes.',
@@ -589,6 +617,8 @@ class _AuthScreenState extends State<AuthScreen> {
                               _nameCtrl.clear();
                               _shopCtrl.clear();
                               _phoneCtrl.clear();
+                              _referralCodeCtrl.clear();
+                              _detectedReferralCounty = null;
                               _emailCtrl.clear();
                               _passwordCtrl.clear();
                               _otpCtrl.clear();
@@ -702,6 +732,21 @@ class _AuthScreenState extends State<AuthScreen> {
                     hint: 'Optional contact number',
                     keyboard: TextInputType.phone,
                   ),
+                  const SizedBox(height: 14),
+                  _field(
+                    label: 'Referral Code (optional)',
+                    controller: _referralCodeCtrl,
+                    icon: Icons.card_giftcard_outlined,
+                    hint: 'Enter your invite code',
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  if (_referralCodeCtrl.text.trim().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Your county is detected from your device location.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF777487)),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                 ],
 
@@ -853,6 +898,7 @@ class _AuthScreenState extends State<AuthScreen> {
     required String hint,
     bool obscure = false,
     TextInputType keyboard = TextInputType.text,
+    ValueChanged<String>? onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -881,6 +927,7 @@ class _AuthScreenState extends State<AuthScreen> {
           ),
           child: TextField(
             controller: controller,
+            onChanged: onChanged,
             obscureText: obscure,
             keyboardType: keyboard,
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),

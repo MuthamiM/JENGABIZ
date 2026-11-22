@@ -91,6 +91,23 @@ void main() {
     ]);
   });
 
+  test('saved-session restoration requests the signed-in profile', () async {
+    final requests = <Map<String, Object?>>[];
+    final api = JengaApiService.forTestingRequests((method, uri, _) async {
+      requests.add({'method': method, 'path': uri.path});
+      return const JengaApiResponse(200, {'success': true, 'user': {}});
+    });
+    api.configure(url: 'https://jengabiz-api.mftechnologies.org');
+
+    expect((await api.fetchAccountProfile())?.succeeded, isTrue);
+    expect(requests, [
+      {
+        'method': 'GET',
+        'path': '/email-auth/me',
+      },
+    ]);
+  });
+
   test(
       'password sign-in stores only a salted hash and rejects a wrong password',
       () async {
@@ -174,9 +191,11 @@ void main() {
     await tester.pumpAndSettle();
 
     final fields = tester.widgetList<TextField>(find.byType(TextField));
-    expect(fields, hasLength(5));
+    expect(fields, hasLength(6));
     expect(fields.every((field) => field.controller?.text.isEmpty ?? true),
         isTrue);
+    expect(find.text('Country'), findsNothing);
+    expect(find.text('County / Region'), findsNothing);
     expect(find.text('Phone Number (optional)'), findsOneWidget);
     expect(find.text('Create Account & Verify Email'), findsOneWidget);
   });

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/db_service.dart';
-import '../widgets/shimmer.dart';
+import '../services/inventory_pdf_export_service.dart';
+import '../services/stock_notification_service.dart';
+import '../widgets/cached_stock_image.dart';
+import '../widgets/product_editor_dialog.dart';
 
 enum StockSort { stockLow, stockHigh, soldHigh, priceLow, priceHigh, nameAsc }
 
@@ -149,51 +152,141 @@ class _StockScreenState extends State<StockScreen> {
     );
   }
 
-  void _showAdjustStockDialog(StockItem item) {
-    final ctrl = TextEditingController(text: item.stockRemaining.toString());
-    showDialog(
+  Future<void> _showProductEditor({StockItem? item}) async {
+    final categories = JengaDB.instance.items
+        .map((stockItem) => stockItem.category)
+        .toSet()
+        .toList();
+    final saved = await showDialog<StockItem>(
+      context: context,
+      builder: (_) => ProductEditorDialog(
+        categories: categories,
+        item: item,
+      ),
+    );
+    if (saved == null) return;
+
+    final persisted = await JengaDB.instance.saveStockItem(saved);
+    if (!mounted) return;
+    if (!persisted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Could not save this product. Please try again.')),
+      );
+      return;
+    }
+    await StockNotificationService.instance.notifyStockLevel(
+      itemId: saved.id,
+      itemName: saved.name,
+      remaining: saved.stockRemaining,
+      reorderLevel: saved.reorderLevel,
+      previousRemaining: item?.stockRemaining,
+    );
+    if (!mounted) return;
+    setState(() {
+      _selectedCategory = 'All';
+      _statusFilter = 'All';
+      _searchCtrl.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(item == null
+            ? 'Product saved. Stock will sync when you are online.'
+            : 'Product updated. Stock will sync when you are online.'),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(StockItem item) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Adjust Stock: ${item.name}',
-            style: const TextStyle(fontSize: 16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Current remaining: ${item.stockRemaining} units'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'New Stock Quantity',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
+        title: const Text('Remove product?'),
+        content: Text('${item.name} will be removed from this shop inventory.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1E6BFF)),
-            onPressed: () async {
-              final val = int.tryParse(ctrl.text);
-              if (val != null) {
-                await JengaDB.instance.setStock(item.id, val);
-                setState(() {});
-              }
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Save Changes'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
+    if (confirmed != true) return;
+    final persisted = await JengaDB.instance.deleteStockItem(item.id);
+    if (!mounted) return;
+    if (!persisted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Could not remove this product. Please try again.')),
+      );
+      return;
+    }
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Product removed from inventory.')),
+    );
+  }
+
+  Future<void> _changeStock(StockItem item, int delta) async {
+    final previousRemaining = item.stockRemaining;
+    final previousUnitsSold = item.unitsSold;
+    final saved = await JengaDB.instance.adjustStock(item.id, delta);
+    if (!mounted) return;
+    setState(() {});
+    if (!saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Could not save the stock change. Please retry.')),
+      );
+      return;
+    }
+    await StockNotificationService.instance.notifyStockLevel(
+      itemId: item.id,
+      itemName: item.name,
+      remaining: item.stockRemaining,
+      reorderLevel: item.reorderLevel,
+      previousRemaining: previousRemaining,
+    );
+    if (delta < 0) {
+      await StockNotificationService.instance.notifyHalfSold(
+        itemId: item.id,
+        itemName: item.name,
+        previousRemaining: previousRemaining,
+        previousUnitsSold: previousUnitsSold,
+        remaining: item.stockRemaining,
+        unitsSold: item.unitsSold,
+      );
+    }
+  }
+
+  Future<void> _exportStockPdf() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final db = JengaDB.instance;
+    final revenue = db.items
+        .fold<double>(0, (sum, item) => sum + item.price * item.unitsSold);
+    final cost = db.items
+        .fold<double>(0, (sum, item) => sum + item.costPrice * item.unitsSold);
+    final units = db.items.fold<int>(0, (sum, item) => sum + item.unitsSold);
+    try {
+      await InventoryPdfExportService.shareInventory(
+        items: db.items,
+        shopName: db.currentUser?.shopName ?? 'JengaBiz shop',
+        revenue: revenue,
+        cost: cost,
+        unitsSold: units,
+      );
+    } catch (_) {
+      if (!mounted || !messenger.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+            content: Text('Could not export the stock PDF. Please try again.')),
+      );
+    }
   }
 
   @override
@@ -203,14 +296,10 @@ class _StockScreenState extends State<StockScreen> {
     const titleColor = Color(0xFF17162A);
     const kBlue = Color(0xFF1E6BFF);
     final allItems = JengaDB.instance.items;
-    final totalSold = allItems.fold<int>(0, (sum, it) => sum + it.unitsSold);
-    final lowStockCount =
-        allItems.where((it) => it.isLowStock || it.isOutOfStock).length;
     final displayed = _filteredItems;
 
-    final halfSoldCount = allItems.where((it) => it.isHalfSold).length;
-
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: kBg,
       appBar: AppBar(
         backgroundColor: cardBg,
@@ -220,24 +309,17 @@ class _StockScreenState extends State<StockScreen> {
           icon: const Icon(Icons.arrow_back_rounded, color: titleColor),
           onPressed: widget.onBack,
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Stock & Inventory Manager',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: titleColor,
-              ),
-            ),
-            Text(
-              '${allItems.length} Total Products in Catalog',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF777487)),
-            ),
-          ],
-        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf_outlined, color: kBlue),
+            tooltip: 'Export stock PDF',
+            onPressed: _exportStockPdf,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_box_outlined, color: kBlue),
+            tooltip: 'Add product',
+            onPressed: () => _showProductEditor(),
+          ),
           IconButton(
             icon: const Icon(Icons.sort_rounded, color: kBlue),
             tooltip: 'Sort Items',
@@ -247,282 +329,233 @@ class _StockScreenState extends State<StockScreen> {
       ),
       body: Column(
         children: [
-          // GPS Location Supply Hub Dispatch Bar
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-            color: const Color(0xFFEFF5FF),
-            child: Row(
-              children: [
-                const Icon(Icons.near_me_rounded, size: 14, color: kBlue),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Restock Dispatch: ${JengaDB.instance.nearestHubName} (${JengaDB.instance.nearestHubDistanceKm.toStringAsFixed(1)} km)',
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: kBlue),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // KPI Quick Stats
-          Container(
-            color: cardBg,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _statBadge('Total Items', '${allItems.length}',
-                      const Color(0xFFE8EEF8), kBlue),
-                  const SizedBox(width: 8),
-                  _statBadge('Units Sold', '$totalSold',
-                      const Color(0xFFE1F6F4), const Color(0xFF0F9D85)),
-                  const SizedBox(width: 8),
-                  _statBadge('Half Sold (50%+)', '$halfSoldCount',
-                      const Color(0xFFFEF3C7), const Color(0xFFD97706)),
-                  const SizedBox(width: 8),
-                  _statBadge(
-                    'Low Stock',
-                    '$lowStockCount',
-                    const Color(0xFFFFF0DC),
-                    const Color(0xFFE65100),
+          // Keep the search field fixed while the inventory content scrolls.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0xFFE4E6F0)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x06000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
                   ),
                 ],
               ),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: (_) => setState(() {}),
+                style: const TextStyle(color: Color(0xFF17162A)),
+                decoration: InputDecoration(
+                  prefixIcon:
+                      const Icon(Icons.search_rounded, color: kBlue, size: 20),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() {});
+                          },
+                        )
+                      : null,
+                  hintText: 'Search product name, category, or SKU...',
+                  hintStyle:
+                      const TextStyle(color: Color(0xFFB0ADC0), fontSize: 13),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+              ),
             ),
           ),
-
-          // Search Bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: cardBg,
-                      borderRadius: BorderRadius.circular(23),
-                      border: Border.all(
-                        color: const Color(0xFFE4E6F0),
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x06000000),
-                          blurRadius: 6,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: TextField(
-                      controller: _searchCtrl,
-                      onChanged: (_) => setState(() {}),
-                      style: const TextStyle(color: Color(0xFF17162A)),
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.search_rounded,
-                            color: kBlue, size: 20),
-                        suffixIcon: _searchCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear_rounded, size: 18),
-                                onPressed: () {
-                                  _searchCtrl.clear();
-                                  setState(() {});
-                                },
-                              )
-                            : null,
-                        hintText: 'Search 500+ items or SKU...',
-                        hintStyle: const TextStyle(
-                            color: Color(0xFFB0ADC0), fontSize: 13),
-                        border: InputBorder.none,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: _showSortSheet,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    height: 46,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8EEF8),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Row(
+          Expanded(
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(child: _statusFilters()),
+                SliverToBoxAdapter(child: _categoryFilters()),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Row(
                       children: [
-                        Icon(Icons.tune_rounded, size: 18, color: kBlue),
-                        SizedBox(width: 4),
-                        Text(
-                          'Sort',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: kBlue,
+                        Expanded(
+                          child: Text(
+                            'Showing ${displayed.length} of ${allItems.length} items',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF706C81),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _sortLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: kBlue,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-
-          // Status Filter Tabs
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                'All',
-                'In Stock',
-                'Half Sold (50%+)',
-                'Low Stock',
-                'Out of Stock'
-              ].map((st) {
-                final active = _statusFilter == st;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: FilterChip(
-                    label: Text(st),
-                    selected: active,
-                    onSelected: (_) => setState(() => _statusFilter = st),
-                    backgroundColor: cardBg,
-                    selectedColor: kBlue,
-                    labelStyle: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: active ? Colors.white : const Color(0xFF555268),
-                    ),
-                    shape: StadiumBorder(
-                      side: BorderSide(
-                        color: active ? kBlue : const Color(0xFFE4E6F0),
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          // Category Pills
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: JengaDB.instance.getCategories().map((cat) {
-                final active = _selectedCategory == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    label: Text(cat),
-                    selected: active,
-                    onSelected: (_) => setState(() => _selectedCategory = cat),
-                    selectedColor: const Color(0xFF0F172A),
-                    backgroundColor: Colors.white,
-                    labelStyle: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: active ? Colors.white : const Color(0xFF706C81),
-                    ),
-                    shape: StadiumBorder(
-                      side: BorderSide(
-                        color: active
-                            ? const Color(0xFF0F172A)
-                            : const Color(0xFFE4E6F0),
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '+ restocks one unit  ·  − records one sale  ·  edit changes product details',
+                        style:
+                            TextStyle(fontSize: 10, color: Color(0xFF706C81)),
                       ),
                     ),
                   ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          // List Header info
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Showing ${displayed.length} of ${allItems.length} items',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF706C81)),
-                  ),
                 ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    _sortLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.end,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: kBlue),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Product Items List
-          Expanded(
-            child: displayed.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.inventory_2_outlined,
-                            size: 54, color: Color(0xFFB0ADC0)),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No items match your filter',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() {
-                              _selectedCategory = 'All';
-                              _statusFilter = 'All';
-                            });
-                          },
-                          child: const Text('Reset Filters'),
-                        ),
-                      ],
-                    ),
+                if (displayed.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _emptyState(allItems.isEmpty),
                   )
-                : ListView.builder(
+                else
+                  SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    itemCount: displayed.length,
-                    itemBuilder: (ctx, idx) {
-                      final item = displayed[idx];
-                      return _buildItemCard(item);
-                    },
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) => _buildItemCard(displayed[index]),
+                        childCount: displayed.length,
+                      ),
+                    ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showProductEditor(),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add product'),
+      ),
+    );
+  }
+
+  Widget _statusFilters() {
+    const blue = Color(0xFF1E6BFF);
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          'All',
+          'In Stock',
+          'Half Sold (50%+)',
+          'Low Stock',
+          'Out of Stock',
+        ].map((status) {
+          final active = _statusFilter == status;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              label: Text(status),
+              selected: active,
+              onSelected: (_) => setState(() => _statusFilter = status),
+              backgroundColor: Colors.white,
+              selectedColor: blue,
+              labelStyle: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: active ? Colors.white : const Color(0xFF555268),
+              ),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: active ? blue : const Color(0xFFE4E6F0),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _categoryFilters() {
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+        children: JengaDB.instance.getCategories().map((category) {
+          final active = _selectedCategory == category;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: Text(category),
+              selected: active,
+              onSelected: (_) => setState(() => _selectedCategory = category),
+              selectedColor: const Color(0xFF0F172A),
+              backgroundColor: Colors.white,
+              labelStyle: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: active ? Colors.white : const Color(0xFF706C81),
+              ),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: active
+                      ? const Color(0xFF0F172A)
+                      : const Color(0xFFE4E6F0),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _emptyState(bool inventoryIsEmpty) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.inventory_2_outlined,
+              size: 54, color: Color(0xFFB0ADC0)),
+          const SizedBox(height: 12),
+          const Text(
+            'No products in this view',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
+          if (inventoryIsEmpty)
+            FilledButton.icon(
+              onPressed: () => _showProductEditor(),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add your first product'),
+            ),
+          TextButton(
+            onPressed: () {
+              _searchCtrl.clear();
+              setState(() {
+                _selectedCategory = 'All';
+                _statusFilter = 'All';
+              });
+            },
+            child: const Text('Reset Filters'),
           ),
         ],
       ),
@@ -544,35 +577,6 @@ class _StockScreenState extends State<StockScreen> {
       case StockSort.nameAsc:
         return 'Sorted: Name A-Z';
     }
-  }
-
-  Widget _statBadge(String label, String value, Color bg, Color fg) {
-    return SizedBox(
-      width: 126,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-        decoration:
-            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: fg.withValues(alpha: 0.8)),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w900, color: fg),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildItemCard(StockItem item) {
@@ -619,20 +623,7 @@ class _StockScreenState extends State<StockScreen> {
             child: SizedBox(
               width: 70,
               height: 70,
-              child: Image.network(
-                item.imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: const Color(0xFFE8EEF8),
-                  child: const Icon(Icons.image_outlined,
-                      color: Color(0xFF1E6BFF), size: 28),
-                ),
-                loadingBuilder: (_, child, progress) {
-                  if (progress == null) return child;
-                  return const ShimmerBox(
-                      width: 70, height: 70, borderRadius: 12);
-                },
-              ),
+              child: _stockPhoto(item),
             ),
           ),
           const SizedBox(width: 12),
@@ -744,20 +735,30 @@ class _StockScreenState extends State<StockScreen> {
           const SizedBox(width: 6),
           Column(
             children: [
-              _circleBtn(Icons.add_rounded, const Color(0xFF1E6BFF), () async {
-                await JengaDB.instance.adjustStock(item.id, 1);
-                setState(() {});
-              }),
+              _circleBtn(
+                Icons.add_rounded,
+                const Color(0xFF1E6BFF),
+                () => _changeStock(item, 1),
+                tooltip: 'Restock one unit',
+              ),
               const SizedBox(height: 4),
-              _circleBtn(Icons.edit_outlined, const Color(0xFF706C81), () {
-                _showAdjustStockDialog(item);
-              }),
+              _circleBtn(
+                Icons.edit_outlined,
+                const Color(0xFF706C81),
+                () => _showProductEditor(item: item),
+                tooltip: 'Edit product details and quantity',
+              ),
               const SizedBox(height: 4),
-              _circleBtn(Icons.remove_rounded, const Color(0xFFE65100),
-                  () async {
-                await JengaDB.instance.adjustStock(item.id, -1);
-                setState(() {});
-              }),
+              _circleBtn(
+                Icons.remove_rounded,
+                const Color(0xFFE65100),
+                () => _changeStock(item, -1),
+                tooltip: 'Record one sale',
+              ),
+              const SizedBox(height: 4),
+              _circleBtn(Icons.delete_outline_rounded, const Color(0xFFD32F2F),
+                  () => _confirmDelete(item),
+                  tooltip: 'Remove product'),
             ],
           ),
         ],
@@ -765,18 +766,28 @@ class _StockScreenState extends State<StockScreen> {
     );
   }
 
-  Widget _circleBtn(IconData icon, Color col, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: col.withValues(alpha: 0.1),
-          shape: BoxShape.circle,
+  Widget _stockPhoto(StockItem item) => CachedStockImage(
+        imageUrl: item.imageUrl,
+        ownerId: JengaDB.instance.currentUser?.id ??
+            JengaDB.instance.inventoryOwnerId,
+      );
+
+  Widget _circleBtn(IconData icon, Color col, VoidCallback onTap,
+      {required String tooltip}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: col.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 18, color: col),
         ),
-        child: Icon(icon, size: 16, color: col),
       ),
     );
   }

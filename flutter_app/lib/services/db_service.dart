@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'cache_service.dart';
+import 'firebase_push_service.dart';
 import 'password_hasher.dart';
+import 'stock_image_cache_service.dart';
 
 class JengaUser {
   final String id;
@@ -16,6 +18,9 @@ class JengaUser {
   final String shopName;
   final String phone;
   final String email;
+  final String country;
+  final String county;
+  final String referralCode;
   final String createdAt;
   final String? passwordSalt;
   final String? passwordHash;
@@ -27,6 +32,9 @@ class JengaUser {
     required this.phone,
     required this.email,
     required this.createdAt,
+    this.country = '',
+    this.county = '',
+    this.referralCode = '',
     this.passwordSalt,
     this.passwordHash,
   });
@@ -37,6 +45,9 @@ class JengaUser {
         'shopName': shopName,
         'phone': phone,
         'email': email,
+        'country': country,
+        'county': county,
+        'referralCode': referralCode,
         'createdAt': createdAt,
         if (passwordSalt != null) 'passwordSalt': passwordSalt,
         if (passwordHash != null) 'passwordHash': passwordHash,
@@ -48,6 +59,9 @@ class JengaUser {
         shopName: json['shopName'] as String? ?? 'My Duka',
         phone: json['phone'] as String? ?? '+254 700 000 000',
         email: json['email'] as String? ?? 'owner@jengabiz.com',
+        country: json['country'] as String? ?? '',
+        county: json['county'] as String? ?? '',
+        referralCode: json['referralCode'] as String? ?? '',
         createdAt:
             json['createdAt'] as String? ?? DateTime.now().toIso8601String(),
         passwordSalt: json['passwordSalt'] as String?,
@@ -125,6 +139,8 @@ class JengaDB {
   JengaUser? currentUser;
   String? inventoryOwnerId;
   bool isInitialized = false;
+  bool shouldResumeSavedSession = false;
+  bool _stockSyncInProgress = false;
   String nearestHubName = 'Industrial Area Logistics Point';
   double nearestHubDistanceKm = 4.2;
   double? latitude;
@@ -132,6 +148,7 @@ class JengaDB {
 
   Future<void> init() async {
     if (isInitialized) return;
+    shouldResumeSavedSession = false;
 
     try {
       await JengaApiService.instance.restoreSession();
@@ -201,6 +218,7 @@ class JengaDB {
         inventoryOwnerId = currentUser!.id;
         await prefs.setString('jengabiz_inventory_owner_id', currentUser!.id);
       }
+      await _resumeSavedSession();
     } catch (e) {
       try {
         final assetJson = await rootBundle.loadString('assets/items_db.json');
@@ -213,27 +231,113 @@ class JengaDB {
     isInitialized = true;
   }
 
-  Future<void> saveItems() async {
+  Future<bool> saveItems() async {
     try {
       await _persistItemsLocally();
+    } catch (_) {
+      return false;
+    }
+
+    final owner = currentUser?.id;
+    if (owner != null) {
       final api = JengaApiService.instance;
-      final owner = currentUser?.id;
-      if (owner != null) {
+      final syncKey = _stockSyncKey(owner);
+      try {
         final prefs = await SharedPreferences.getInstance();
-        final syncKey = _stockSyncKey(owner);
         if (api.authToken == null ||
             api.sessionEmail != currentUser?.email.toLowerCase()) {
           await prefs.setBool(syncKey, true);
-          return;
+          return true;
         }
-        final synced = await api.replaceAccountStock(
-          items.map((item) => item.toJson()).toList(),
+        final synced = await _replaceAccountStock(
+          api,
+          sourceDeviceToken: FirebasePushService.instance.currentToken,
         );
         await prefs.setBool(syncKey, !synced);
+      } catch (_) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(syncKey, true);
+        } catch (_) {}
       }
-    } catch (e) {
-      // ignore
     }
+    return true;
+  }
+
+  Future<bool> _replaceAccountStock(
+    JengaApiService api, {
+    String? sourceDeviceToken,
+  }) async {
+    final pendingImageItems = items
+        .where((item) => item.imageUrl.startsWith('data:image/'))
+        .toList(growable: false);
+    if (pendingImageItems.isEmpty) {
+      return api.replaceAccountStock(
+        items.map((item) => item.toJson()).toList(),
+        sourceDeviceToken: sourceDeviceToken,
+      );
+    }
+
+    List<Map<String, dynamic>> stockPayload(
+            {required bool omitPendingImages}) =>
+        items.map((item) {
+          final json = item.toJson();
+          if (omitPendingImages && item.imageUrl.startsWith('data:image/')) {
+            json['imageUrl'] = '';
+          }
+          return json;
+        }).toList();
+
+    final metadataSaved = await api.replaceAccountStock(
+      stockPayload(omitPendingImages: true),
+      sourceDeviceToken: sourceDeviceToken,
+    );
+    if (!metadataSaved) return false;
+
+    var allImagesUploaded = true;
+    for (final item in pendingImageItems) {
+      final match = RegExp(
+        r'^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$',
+      ).firstMatch(item.imageUrl);
+      if (match == null) {
+        allImagesUploaded = false;
+        continue;
+      }
+      try {
+        final imageData = base64Decode(match.group(2)!);
+        if (imageData.isEmpty || imageData.length > 1024 * 1024) {
+          allImagesUploaded = false;
+          continue;
+        }
+        final remoteImageUrl = await api.uploadStockImage(
+          itemId: item.id,
+          mimeType: match.group(1)!,
+          imageData: imageData,
+        );
+        if (remoteImageUrl == null) {
+          allImagesUploaded = false;
+          continue;
+        }
+        final ownerId = currentUser?.id;
+        if (ownerId != null) {
+          await StockImageCacheService.instance.saveImage(
+            ownerId,
+            item.id,
+            imageData,
+          );
+        }
+        item.imageUrl = remoteImageUrl;
+        await _persistItemsLocally();
+      } catch (_) {
+        allImagesUploaded = false;
+      }
+    }
+
+    final metadataWithUploadedImages = await api.replaceAccountStock(
+      stockPayload(omitPendingImages: true),
+      sourceDeviceToken: sourceDeviceToken,
+    );
+    return allImagesUploaded && metadataWithUploadedImages;
   }
 
   Future<void> _persistItemsLocally() async {
@@ -308,8 +412,60 @@ class JengaDB {
     await _persistItemsLocally();
   }
 
+  Future<void> _resumeSavedSession() async {
+    final api = JengaApiService.instance;
+    final email = api.sessionEmail?.trim().toLowerCase();
+    if (api.authToken == null || email == null || email.isEmpty) return;
+
+    final cachedUser = findUser(email);
+    if (cachedUser != null) {
+      await _activateLocalUser(cachedUser);
+    }
+
+    final response = await api.fetchAccountProfile();
+    if (response?.succeeded == true && response?.data['user'] is Map) {
+      final profile = Map<String, dynamic>.from(response!.data['user'] as Map);
+      currentUser = await persistAuthenticatedAccount(profile: profile);
+      shouldResumeSavedSession = true;
+      await syncStockWithServer();
+      return;
+    }
+
+    if (response?.statusCode == 401) {
+      await api.clearSession();
+      currentUser = null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_user_id');
+      return;
+    }
+
+    // The saved profile remains usable offline. Keep the secure token so the
+    // next connected request can refresh the rolling session or reject it.
+    if (cachedUser != null) {
+      currentUser = cachedUser;
+      shouldResumeSavedSession = true;
+    }
+  }
+
   /// Pull a user's database inventory, or upload the local copy for a new account.
   Future<bool> syncStockWithServer() async {
+    if (_stockSyncInProgress) return false;
+    _stockSyncInProgress = true;
+    try {
+      return await _performStockSync();
+    } finally {
+      _stockSyncInProgress = false;
+    }
+  }
+
+  Future<bool> hasPendingStockSync() async {
+    final ownerId = currentUser?.id;
+    if (ownerId == null) return false;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_stockSyncKey(ownerId)) ?? false;
+  }
+
+  Future<bool> _performStockSync() async {
     final api = JengaApiService.instance;
     if (api.authToken == null ||
         api.sessionEmail != currentUser?.email.toLowerCase()) {
@@ -319,8 +475,9 @@ class JengaDB {
     final syncKey = _stockSyncKey(currentUser!.id);
     final hasPendingLocalChanges = prefs.getBool(syncKey) ?? false;
     if (hasPendingLocalChanges && inventoryOwnerId == currentUser!.id) {
-      final saved = await api.replaceAccountStock(
-        items.map((item) => item.toJson()).toList(),
+      final saved = await _replaceAccountStock(
+        api,
+        sourceDeviceToken: FirebasePushService.instance.currentToken,
       );
       if (!saved) return false;
       await prefs.setBool(syncKey, false);
@@ -331,8 +488,9 @@ class JengaDB {
     if (remoteItems.isEmpty &&
         items.isNotEmpty &&
         inventoryOwnerId == currentUser?.id) {
-      final saved = await api.replaceAccountStock(
-        items.map((item) => item.toJson()).toList(),
+      final saved = await _replaceAccountStock(
+        api,
+        sourceDeviceToken: FirebasePushService.instance.currentToken,
       );
       if (saved) {
         await prefs.setBool(syncKey, false);
@@ -386,6 +544,9 @@ class JengaDB {
     required String password,
     String? accountId,
     String? accountCreatedAt,
+    String country = '',
+    String county = '',
+    String referralCode = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final normalizedEmail = email.trim().toLowerCase();
@@ -404,6 +565,9 @@ class JengaDB {
       shopName: shopName.trim().isEmpty ? 'My Duka' : shopName.trim(),
       phone: phone.trim().isEmpty ? '+254 700 000 000' : phone.trim(),
       email: normalizedEmail,
+      country: country.trim(),
+      county: county.trim(),
+      referralCode: referralCode.trim().toUpperCase(),
       createdAt: accountCreatedAt ?? DateTime.now().toIso8601String(),
       passwordSalt: salt,
       passwordHash: await hashPassword(password, salt),
@@ -423,7 +587,7 @@ class JengaDB {
 
   Future<JengaUser> persistAuthenticatedAccount({
     required Map<String, dynamic> profile,
-    required String password,
+    String? password,
   }) async {
     final email = (profile['email'] as String? ?? '').trim().toLowerCase();
     if (email.isEmpty || !email.contains('@')) {
@@ -440,9 +604,11 @@ class JengaDB {
           : await _readInventorySnapshot(existingLocalUser.id);
     }
 
-    final salt = List<int>.generate(16, (_) => Random.secure().nextInt(256))
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final salt = password == null
+        ? existingLocalUser?.passwordSalt
+        : List<int>.generate(16, (_) => Random.secure().nextInt(256))
+            .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+            .join();
     final user = JengaUser(
       id: profile['id'] as String? ??
           'usr_${DateTime.now().millisecondsSinceEpoch}',
@@ -450,10 +616,18 @@ class JengaDB {
       shopName: profile['shopName'] as String? ?? 'My Duka',
       phone: profile['phone'] as String? ?? '',
       email: email,
+      country:
+          profile['country'] as String? ?? existingLocalUser?.country ?? '',
+      county: profile['county'] as String? ?? existingLocalUser?.county ?? '',
+      referralCode: profile['referralCode'] as String? ??
+          existingLocalUser?.referralCode ??
+          '',
       createdAt:
           profile['createdAt'] as String? ?? DateTime.now().toIso8601String(),
       passwordSalt: salt,
-      passwordHash: await hashPassword(password, salt),
+      passwordHash: password == null
+          ? existingLocalUser?.passwordHash
+          : await hashPassword(password, salt!),
     );
     users.removeWhere((saved) => saved.email.toLowerCase() == email);
     users.add(user);
@@ -524,6 +698,9 @@ class JengaDB {
       shopName: oldUser.shopName,
       phone: oldUser.phone,
       email: oldUser.email,
+      country: oldUser.country,
+      county: oldUser.county,
+      referralCode: oldUser.referralCode,
       createdAt: oldUser.createdAt,
       passwordSalt: salt,
       passwordHash: await hashPassword(password, salt),
@@ -546,29 +723,71 @@ class JengaDB {
   }
 
   Future<void> logout() async {
+    await FirebasePushService.instance.removeCurrentDevice();
+    await JengaApiService.instance.logoutAccount();
     currentUser = null;
+    shouldResumeSavedSession = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('current_user_id');
   }
 
-  Future<void> adjustStock(String itemId, int delta) async {
+  Future<bool> adjustStock(String itemId, int delta) async {
     final idx = items.indexWhere((it) => it.id == itemId);
     if (idx != -1) {
       final it = items[idx];
-      it.stockRemaining = (it.stockRemaining + delta).clamp(0, 99999);
-      if (delta < 0) {
-        it.unitsSold += (-delta);
+      final remaining = it.stockRemaining;
+      final sold = it.unitsSold;
+      it.stockRemaining = (remaining + delta).clamp(0, 99999);
+      if (delta < 0) it.unitsSold += remaining - it.stockRemaining;
+      final saved = await saveItems();
+      if (!saved) {
+        it.stockRemaining = remaining;
+        it.unitsSold = sold;
       }
-      await saveItems();
+      return saved;
     }
+    return false;
   }
 
-  Future<void> setStock(String itemId, int newQuantity) async {
+  Future<bool> setStock(String itemId, int newQuantity) async {
     final idx = items.indexWhere((it) => it.id == itemId);
     if (idx != -1) {
+      final previous = items[idx].stockRemaining;
       items[idx].stockRemaining = newQuantity.clamp(0, 99999);
-      await saveItems();
+      final saved = await saveItems();
+      if (!saved) items[idx].stockRemaining = previous;
+      return saved;
     }
+    return false;
+  }
+
+  Future<bool> saveStockItem(StockItem item) async {
+    final index = items.indexWhere((saved) => saved.id == item.id);
+    final previousItems = List<StockItem>.from(items);
+    if (index == -1) {
+      items.insert(0, item);
+    } else {
+      items[index] = item;
+    }
+    final saved = await saveItems();
+    if (!saved) items = previousItems;
+    return saved;
+  }
+
+  Future<bool> deleteStockItem(String itemId) async {
+    final previousItems = List<StockItem>.from(items);
+    items.removeWhere((item) => item.id == itemId);
+    final saved = await saveItems();
+    if (!saved) items = previousItems;
+    if (saved) {
+      final ownerId = currentUser?.id ?? inventoryOwnerId;
+      if (ownerId != null) {
+        try {
+          await StockImageCacheService.instance.removeImage(ownerId, itemId);
+        } catch (_) {}
+      }
+    }
+    return saved;
   }
 
   List<String> getCategories() {

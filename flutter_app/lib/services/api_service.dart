@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'cache_service.dart';
 
 typedef JsonPostTransport = Future<JengaApiResponse?> Function(
     Uri uri, Map<String, dynamic> payload);
+typedef JsonRequestTransport = Future<JengaApiResponse?> Function(
+    String method, Uri uri, Map<String, dynamic> payload);
 
 class JengaApiResponse {
   const JengaApiResponse(this.statusCode, this.data);
@@ -21,15 +24,23 @@ class JengaApiService {
   JengaApiService._()
       : _client = HttpClient()..connectionTimeout = const Duration(seconds: 4),
         _postJsonOverride = null,
+        _requestJsonOverride = null,
         _secureStorage = const FlutterSecureStorage();
 
   /// Test seam for exercising request routing without making network calls.
   JengaApiService.forTesting(this._postJsonOverride)
       : _client = null,
+        _requestJsonOverride = null,
+        _secureStorage = null;
+
+  JengaApiService.forTestingRequests(this._requestJsonOverride)
+      : _client = null,
+        _postJsonOverride = null,
         _secureStorage = null;
 
   final HttpClient? _client;
   final JsonPostTransport? _postJsonOverride;
+  final JsonRequestTransport? _requestJsonOverride;
   final FlutterSecureStorage? _secureStorage;
 
   // Override for local development with --dart-define=JENGABIZ_API_BASE_URL=...
@@ -132,6 +143,10 @@ class JengaApiService {
     Map<String, dynamic>? payload,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
+    final requestOverride = _requestJsonOverride;
+    if (requestOverride != null) {
+      return requestOverride(method, uri, payload ?? const {});
+    }
     final override = _postJsonOverride;
     if (override != null) {
       if (method != 'POST') return null;
@@ -197,6 +212,30 @@ class JengaApiService {
         'password': password,
       });
 
+  Future<JengaApiResponse?> fetchAccountProfile() =>
+      _requestJson('GET', '/email-auth/me');
+
+  Future<bool> registerNotificationDevice({
+    required String deviceToken,
+    required String platform,
+  }) async {
+    final response = await _requestJson(
+      'POST',
+      '/email-auth/notifications/device',
+      payload: {'deviceToken': deviceToken, 'platform': platform},
+    );
+    return response?.succeeded == true;
+  }
+
+  Future<bool> removeNotificationDevice(String deviceToken) async {
+    final response = await _requestJson(
+      'DELETE',
+      '/email-auth/notifications/device',
+      payload: {'deviceToken': deviceToken},
+    );
+    return response?.succeeded == true;
+  }
+
   Future<JengaApiResponse?> createAccount({
     required String email,
     required String verificationToken,
@@ -206,6 +245,8 @@ class JengaApiService {
     required String password,
     required List<Map<String, dynamic>> items,
     bool migrate = false,
+    String county = '',
+    String referralCode = '',
   }) =>
       _requestJson(
         'POST',
@@ -216,9 +257,23 @@ class JengaApiService {
           'name': name,
           'shopName': shopName,
           'phone': phone,
+          'county': county.trim(),
+          'referralCode': referralCode.trim().toUpperCase(),
           'password': password,
           'items': items,
         },
+      );
+
+  Future<JengaApiResponse?> fetchReferralSummary() =>
+      _requestJson('GET', '/email-auth/referrals');
+
+  Future<JengaApiResponse?> saveReferralLocation({
+    required String county,
+  }) =>
+      _requestJson(
+        'PUT',
+        '/email-auth/referrals/location',
+        payload: {'county': county.trim()},
       );
 
   Future<List<Map<String, dynamic>>?> fetchAccountStock() async {
@@ -232,13 +287,78 @@ class JengaApiService {
         .toList();
   }
 
-  Future<bool> replaceAccountStock(List<Map<String, dynamic>> items) async {
+  Future<bool> replaceAccountStock(
+    List<Map<String, dynamic>> items, {
+    String? sourceDeviceToken,
+  }) async {
     final response = await _requestJson(
       'PUT',
       '/email-auth/stock/items',
-      payload: {'items': items},
+      payload: {
+        'items': items,
+        if (sourceDeviceToken != null) 'sourceDeviceToken': sourceDeviceToken,
+      },
     );
     return response?.succeeded == true;
+  }
+
+  Future<String?> uploadStockImage({
+    required String itemId,
+    required String mimeType,
+    required Uint8List imageData,
+  }) async {
+    final response = await _requestJson(
+      'PUT',
+      '/email-auth/stock/images/${Uri.encodeComponent(itemId)}',
+      payload: {
+        'mimeType': mimeType,
+        'imageBase64': base64Encode(imageData),
+      },
+    );
+    final imageUrl = response?.data['imageUrl'];
+    if (response?.succeeded != true || imageUrl is! String) return null;
+    return imageUrl;
+  }
+
+  Future<Uint8List?> fetchStockImage(String itemId) async {
+    final client = _client;
+    if (client == null || !RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(itemId)) {
+      return null;
+    }
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/email-auth/stock/images/${Uri.encodeComponent(itemId)}',
+      );
+      final request = await client.getUrl(uri);
+      request.headers
+          .set(HttpHeaders.acceptHeader, 'image/jpeg, image/png, image/webp');
+      if (authToken != null) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $authToken');
+      }
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok ||
+          (response.contentLength > 1024 * 1024)) {
+        await response.drain<void>();
+        return null;
+      }
+      final contentType = response.headers.contentType?.mimeType;
+      if (!const {'image/jpeg', 'image/png', 'image/webp'}
+          .contains(contentType)) {
+        await response.drain<void>();
+        return null;
+      }
+      final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
+        if (all.length + chunk.length > 1024 * 1024) {
+          throw const FormatException('Stock image is larger than 1 MB.');
+        }
+        all.addAll(chunk);
+        return all;
+      });
+      return bytes.isEmpty ? null : Uint8List.fromList(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> logoutAccount() async {

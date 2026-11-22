@@ -1,5 +1,6 @@
 import 'package:duka_ledger/main.dart';
 import 'package:duka_ledger/screens/stock_screen.dart';
+import 'package:duka_ledger/services/api_service.dart';
 import 'package:duka_ledger/services/db_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +42,11 @@ void main() {
     expect(find.text('Total Revenue'), findsOneWidget);
     expect(find.text('In Stock'), findsOneWidget);
     expect(find.text('Low Stock'), findsOneWidget);
+    final nav = find.byType(FloatingNav);
+    final selectedHomeIcon = tester.widget<Icon>(
+      find.descendant(of: nav, matching: find.byIcon(Icons.home_outlined)),
+    );
+    expect(selectedHomeIcon.color, kBlue);
     expect(tester.takeException(), isNull);
 
     final quickStatsScroll = find.byWidgetPredicate(
@@ -94,12 +100,65 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Stock & Inventory Manager'), findsOneWidget);
+    expect(find.text('Stock & Inventory Manager'), findsNothing);
+    expect(find.text('Restock Dispatch'), findsNothing);
     expect(find.text('QA stock item'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byIcon(Icons.arrow_back_rounded).first);
     expect(wentBack, isTrue);
+  });
+
+  testWidgets('stock screen offers product creation', (tester) async {
+    final db = JengaDB.instance;
+    db.items = [];
+    db.currentUser = null;
+    db.inventoryOwnerId = null;
+
+    await tester.pumpWidget(
+      MaterialApp(home: StockScreen(onBack: () {})),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add product'), findsOneWidget);
+    await tester.tap(find.text('Add product'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add Product'), findsOneWidget);
+    expect(find.text('Product name'), findsOneWidget);
+    expect(find.text('Quantity on hand'), findsOneWidget);
+    expect(find.text('Low-stock alert at'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('product editor handles keyboard resize and dialog dismissal',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetViewInsets);
+
+    final db = JengaDB.instance;
+    db.items = [];
+    await tester.pumpWidget(
+      MaterialApp(home: StockScreen(onBack: () {})),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Add product'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Add Product'), findsOneWidget);
+    expect(find.text('Upload stock image'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('JengaBiz landing page starts sign-in when continued',
@@ -141,6 +200,13 @@ void main() {
             go: (_) {},
             unread: 0,
             onLogout: () {},
+            referralSummaryLoader: () async => const JengaApiResponse(200, {
+              'success': true,
+              'hasLocation': true,
+              'referralCode': 'referral',
+              'totalPoints': 0,
+              'referralCount': 0,
+            }),
           ),
         ),
       ),
@@ -154,14 +220,15 @@ void main() {
     expect(find.text('WhatsApp'), findsNothing);
     expect(find.text('X (Twitter)'), findsNothing);
 
-    await tester.tap(find.text('Refer & Earn (KES 100)'));
+    await tester.tap(find.text('Refer & Earn'));
     await tester.pumpAndSettle();
 
     expect(
       find.text('https://jengabiz.mftechnologies.org/?ref=referral'),
       findsOneWidget,
     );
-    expect(find.textContaining('Tap the link to share'), findsOneWidget);
+    expect(find.text('50–75 pts'), findsNothing);
+    expect(find.textContaining('different county or country'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

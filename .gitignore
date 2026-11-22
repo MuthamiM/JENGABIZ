@@ -37,6 +37,7 @@ logs/
 
 # Secrets — NEVER commit API keys or credentials
 flutter_app/lib/config/secrets.dart
+deployment/secrets/
 *.keystore
 *.jks
 *.p12

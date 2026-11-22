@@ -48,9 +48,11 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-}
       - OTP_HASH_SECRET=${JENGABIZ_OTP_HASH_SECRET:-}
+      - FIREBASE_SERVICE_ACCOUNT_FILE=/run/secrets/jengabiz-fcm-service-account.json
     volumes:
       - ./backend/email-otp:/app:ro
       - jengabiz_account_data:/data
+      - ./deployment/secrets/jengabiz-fcm-service-account.json:/run/secrets/jengabiz-fcm-service-account.json:ro
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://127.0.0.1:5081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

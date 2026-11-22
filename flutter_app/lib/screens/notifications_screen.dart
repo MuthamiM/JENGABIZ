@@ -110,21 +110,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       );
     }
 
-    // 4. Referral bonus notification
-    notifs.add(
-      JengaNotification(
-        id: 'referral_bonus',
-        title: 'Referral Bonus: KES 100 Earned',
-        body:
-            'Otieno General Stores activated their JengaBiz account using your referral link. KES 100 credited to your duka.',
-        timestamp: DateTime.now().subtract(const Duration(hours: 3)),
-        type: NotificationType.referral,
-        isRead: false,
-        route: 'profile',
-      ),
-    );
-
-    // 5. Revenue milestone
+    // 4. Revenue milestone
     notifs.add(
       JengaNotification(
         id: 'revenue_milestone',
@@ -272,7 +258,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded, color: titleColor),
+                    icon:
+                        const Icon(Icons.arrow_back_rounded, color: titleColor),
                     onPressed: widget.onBack,
                   ),
                   const SizedBox(width: 8),
@@ -356,8 +343,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       itemBuilder: (ctx, idx) {
                         final item = filtered[idx];
                         final color = _colorForType(item.type);
-                        final itemCardBg =
-                            item.isRead ? Colors.white : const Color(0xFFF1F5FD);
+                        final itemCardBg = item.isRead
+                            ? Colors.white
+                            : const Color(0xFFF1F5FD);
                         const itemTitleColor = Color(0xFF17162A);
                         const itemBodyColor = Color(0xFF6B687D);
 

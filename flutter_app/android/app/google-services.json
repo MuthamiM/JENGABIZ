@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "669929662185",
+    "project_id": "jengabiz-mftechnologies",
+    "storage_bucket": "jengabiz-mftechnologies.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:669929662185:android:1370349abdc01abfd53278",
+        "android_client_info": {
+          "package_name": "com.dukaledger.duka_ledger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDfSMOdoTEgqJHj8SLR70LXMyv6p9nSD84"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

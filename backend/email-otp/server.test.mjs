@@ -137,6 +137,279 @@ test('verified account, session, and stock data persist in scoped SQLite records
   });
 });
 
+test('Kenya referrals use detected counties and award points by county', async () => {
+  await withService({
+    apiKey: 'test-key',
+    fromEmail: 'verify@example.com',
+    hashSecret: 'test-hash-secret',
+    makeOtp: () => '246810',
+    sendEmail: async () => {},
+  }, async (baseUrl) => {
+    async function register(email, { county = '', referralCode = '' } = {}) {
+      await post(baseUrl, '/email-auth/request-otp', { email });
+      const verification = await post(baseUrl, '/email-auth/verify-otp', {
+        email,
+        otp: '246810',
+      });
+      return post(baseUrl, '/email-auth/register', {
+        email,
+        verificationToken: verification.body.verificationToken,
+        name: 'QA Owner',
+        shopName: 'QA Shop',
+        phone: '',
+        password: 'correct horse battery',
+        county,
+        referralCode,
+        items: [],
+      });
+    }
+
+    const inviter = await register('inviter@example.com');
+    assert.equal(inviter.status, 201);
+    const inviterToken = inviter.body.sessionToken;
+    const savedLocation = await request(
+      baseUrl,
+      '/email-auth/referrals/location',
+      {
+        method: 'PUT',
+        token: inviterToken,
+        payload: { country: 'Uganda', county: 'Nairobi County' },
+      },
+    );
+    assert.equal(savedLocation.status, 200);
+    assert.equal(savedLocation.body.user.country, 'KE');
+    assert.equal(savedLocation.body.user.county, 'Nairobi');
+    assert.equal(savedLocation.body.user.countyDetected, true);
+
+    const referralCode = inviter.body.user.referralCode;
+    const sameCounty = await register('same@example.com', {
+      county: 'Nairobi County',
+      referralCode,
+    });
+    const differentCounty = await register('different@example.com', {
+      county: 'Mombasa County',
+      referralCode,
+    });
+    const invalidCounty = await register('invalid@example.com', {
+      county: 'California',
+      referralCode,
+    });
+    assert.equal(sameCounty.status, 201);
+    assert.equal(differentCounty.status, 201);
+    assert.equal(invalidCounty.status, 400);
+    assert.match(invalidCounty.body.message, /location/i);
+
+    const summary = await request(baseUrl, '/email-auth/referrals', {
+      token: inviterToken,
+    });
+    assert.equal(summary.status, 200);
+    assert.equal(summary.body.totalPoints, 125);
+    assert.equal(summary.body.sameCountyCount, 1);
+    assert.equal(summary.body.differentCountyCount, 1);
+    assert.equal(summary.body.referralCount, 2);
+  });
+});
+
+test('stock images require a signed-in shop and stay isolated to that account', async () => {
+  await withService({
+    apiKey: 'test-key',
+    fromEmail: 'verify@example.com',
+    hashSecret: 'test-hash-secret',
+    makeOtp: () => '246810',
+    sendEmail: async () => {},
+  }, async (baseUrl) => {
+    async function register(email) {
+      await post(baseUrl, '/email-auth/request-otp', { email });
+      const verification = await post(baseUrl, '/email-auth/verify-otp', {
+        email,
+        otp: '246810',
+      });
+      const registered = await post(baseUrl, '/email-auth/register', {
+        email,
+        verificationToken: verification.body.verificationToken,
+        name: 'QA Shop Owner',
+        shopName: 'QA Shop',
+        phone: '',
+        password: 'correct horse battery',
+        items: [{
+          id: 'image-item', name: 'Image Item', category: 'General',
+          price: 10, costPrice: 5, stockRemaining: 2, unitsSold: 0,
+          sku: '', imageUrl: '', reorderLevel: 1,
+        }],
+      });
+      return registered.body.sessionToken;
+    }
+
+    const ownerToken = await register('owner@example.com');
+    const otherToken = await register('other@example.com');
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+    const imagePath = '/email-auth/stock/images/image-item';
+
+    const anonymous = await fetch(`${baseUrl}${imagePath}`);
+    assert.equal(anonymous.status, 401);
+
+    const invalidUpload = await request(baseUrl, imagePath, {
+      method: 'PUT',
+      token: ownerToken,
+      payload: { mimeType: 'image/png', imageBase64: Buffer.from('bad').toString('base64') },
+    });
+    assert.equal(invalidUpload.status, 400);
+
+    const uploaded = await request(baseUrl, imagePath, {
+      method: 'PUT',
+      token: ownerToken,
+      payload: { mimeType: 'image/png', imageBase64: png.toString('base64') },
+    });
+    assert.equal(uploaded.status, 200);
+    assert.equal(uploaded.body.imageUrl, 'stock-image:image-item');
+
+    const ownerImage = await fetch(`${baseUrl}${imagePath}`, {
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    assert.equal(ownerImage.status, 200);
+    assert.equal(ownerImage.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await ownerImage.arrayBuffer()), png);
+
+    const otherImage = await fetch(`${baseUrl}${imagePath}`, {
+      headers: { authorization: `Bearer ${otherToken}` },
+    });
+    assert.equal(otherImage.status, 404);
+
+    const removed = await request(baseUrl, '/email-auth/stock/items', {
+      method: 'PUT',
+      token: ownerToken,
+      payload: { items: [{
+        id: 'image-item', name: 'Image Item', category: 'General',
+        price: 10, costPrice: 5, stockRemaining: 2, unitsSold: 0,
+        sku: '', imageUrl: '', reorderLevel: 1,
+      }] },
+    });
+    assert.equal(removed.status, 200);
+    const deletedImage = await fetch(`${baseUrl}${imagePath}`, {
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    assert.equal(deletedImage.status, 404);
+  });
+});
+
+test('active sessions roll forward for 90 days and can restore the profile', async () => {
+  let currentTime = 1_000_000;
+  const day = 24 * 60 * 60 * 1000;
+  await withService({
+    apiKey: 'test-key',
+    fromEmail: 'verify@example.com',
+    hashSecret: 'test-hash-secret',
+    now: () => currentTime,
+    makeOtp: () => '246810',
+    sendEmail: async () => {},
+  }, async (baseUrl) => {
+    await post(baseUrl, '/email-auth/request-otp', { email: 'musa@example.com' });
+    const verification = await post(baseUrl, '/email-auth/verify-otp', {
+      email: 'musa@example.com',
+      otp: '246810',
+    });
+    const registered = await post(baseUrl, '/email-auth/register', {
+      email: 'musa@example.com',
+      verificationToken: verification.body.verificationToken,
+      name: 'Musa Mangi',
+      shopName: 'Umoja Shop',
+      phone: '',
+      password: 'correct horse battery',
+      items: [],
+    });
+    const token = registered.body.sessionToken;
+
+    currentTime += 89 * day;
+    const restored = await request(baseUrl, '/email-auth/me', { token });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.user.email, 'musa@example.com');
+
+    currentTime += 89 * day;
+    assert.equal((await request(baseUrl, '/email-auth/stock/items', { token })).status, 200);
+
+    currentTime += 91 * day;
+    assert.equal((await request(baseUrl, '/email-auth/me', { token })).status, 401);
+  });
+});
+
+test('stock alert device tokens are account scoped and alerts fire on low or empty transitions', async () => {
+  const pushes = [];
+  const stock = [{
+    id: 'item-1', name: 'Maize Flour', category: 'Food', price: 200,
+    costPrice: 170, stockRemaining: 12, unitsSold: 4, sku: 'MF-1',
+    imageUrl: '', reorderLevel: 5,
+  }];
+  await withService({
+    apiKey: 'test-key',
+    fromEmail: 'verify@example.com',
+    hashSecret: 'test-hash-secret',
+    makeOtp: () => '246810',
+    sendEmail: async () => {},
+    sendPush: async (token, notification) => {
+      pushes.push({ token, ...notification });
+      return true;
+    },
+  }, async (baseUrl) => {
+    await post(baseUrl, '/email-auth/request-otp', { email: 'musa@example.com' });
+    const verification = await post(baseUrl, '/email-auth/verify-otp', {
+      email: 'musa@example.com',
+      otp: '246810',
+    });
+    const registered = await post(baseUrl, '/email-auth/register', {
+      email: 'musa@example.com',
+      verificationToken: verification.body.verificationToken,
+      name: 'Musa Mangi',
+      shopName: 'Umoja Shop',
+      phone: '',
+      password: 'correct horse battery',
+      items: stock,
+    });
+    const token = registered.body.sessionToken;
+    const anonymous = await request(baseUrl, '/email-auth/notifications/device', {
+      method: 'POST',
+      payload: { deviceToken: 'device-token-1', platform: 'android' },
+    });
+    assert.equal(anonymous.status, 401);
+
+    const subscribed = await request(baseUrl, '/email-auth/notifications/device', {
+      method: 'POST',
+      token,
+      payload: { deviceToken: 'device-token-1', platform: 'android' },
+    });
+    assert.equal(subscribed.status, 200);
+
+    await request(baseUrl, '/email-auth/stock/items', {
+      method: 'PUT',
+      token,
+      payload: { items: [{ ...stock[0], stockRemaining: 8, unitsSold: 8 }] },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0].token, 'device-token-1');
+    assert.equal(pushes[0].title, 'Stock update');
+    assert.equal(pushes[0].body, 'Maize Flour is at least 50% sold. 8 units remain.');
+
+    await request(baseUrl, '/email-auth/stock/items', {
+      method: 'PUT',
+      token,
+      payload: { items: [{ ...stock[0], stockRemaining: 5, unitsSold: 11 }] },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pushes.length, 2);
+    assert.equal(pushes[1].title, 'Low stock alert');
+    assert.equal(pushes[1].data.stockRemaining, '5');
+
+    await request(baseUrl, '/email-auth/stock/items', {
+      method: 'PUT',
+      token,
+      payload: { items: [{ ...stock[0], stockRemaining: 0, unitsSold: 16 }] },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pushes.length, 3);
+    assert.equal(pushes[2].title, 'Out of stock');
+  });
+});
+
 test('resend is throttled and a later resend invalidates the old code', async () => {
   let currentTime = 100000;
   let sendCount = 0;

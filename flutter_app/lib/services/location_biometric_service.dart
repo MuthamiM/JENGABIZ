@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,16 @@ class KenyanSupplyHub {
     required this.latitude,
     required this.longitude,
     required this.region,
+  });
+}
+
+class DetectedReferralLocation {
+  final String countryCode;
+  final String county;
+
+  const DetectedReferralLocation({
+    required this.countryCode,
+    required this.county,
   });
 }
 
@@ -76,7 +87,8 @@ class LocationBiometricService {
   Future<bool> canUseBiometrics() async {
     try {
       final canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
-      final canAuthenticate = canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
+      final canAuthenticate =
+          canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
       return canAuthenticate;
     } catch (_) {
       return false;
@@ -116,7 +128,8 @@ class LocationBiometricService {
   Future<String> getBiometricTypeLabel() async {
     try {
       final types = await _auth.getAvailableBiometrics();
-      if (types.contains(BiometricType.face) && types.contains(BiometricType.fingerprint)) {
+      if (types.contains(BiometricType.face) &&
+          types.contains(BiometricType.fingerprint)) {
         return 'Fingerprint & Face ID';
       } else if (types.contains(BiometricType.face)) {
         return 'Face ID';
@@ -174,6 +187,33 @@ class LocationBiometricService {
     }
   }
 
+  /// Uses the phone's current location and platform geocoder. Coordinates are
+  /// kept on-device; only the detected country code and county are returned.
+  Future<DetectedReferralLocation?> detectReferralLocation() async {
+    final position = await getPreciseLocation();
+    if (position == null || position.isMocked) return null;
+    try {
+      final placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+      if (placemarks.isEmpty) return null;
+      final placemark = placemarks.first;
+      final countryCode = placemark.isoCountryCode?.trim().toUpperCase() ?? '';
+      final county = (placemark.administrativeArea?.trim().isNotEmpty == true
+              ? placemark.administrativeArea
+              : placemark.subAdministrativeArea)
+          ?.trim();
+      if (countryCode.isEmpty || county == null || county.isEmpty) return null;
+      return DetectedReferralLocation(
+        countryCode: countryCode,
+        county: county,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   KenyanSupplyHub findNearestHub(double lat, double lng) {
     KenyanSupplyHub closest = supplyHubs.first;
     double minDistance = double.infinity;
@@ -193,7 +233,8 @@ class LocationBiometricService {
     return closest;
   }
 
-  double calculateDistanceKm(double lat1, double lon1, double lat2, double lon2) {
+  double calculateDistanceKm(
+      double lat1, double lon1, double lat2, double lon2) {
     final meters = Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
     return meters / 1000.0;
   }

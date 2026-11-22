@@ -1,16 +1,21 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'screens/auth_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/stock_screen.dart';
 import 'services/api_service.dart';
 import 'services/db_service.dart';
+import 'services/firebase_push_service.dart';
+import 'services/inventory_pdf_export_service.dart';
 import 'services/location_biometric_service.dart';
+import 'services/stock_notification_service.dart';
 
 const kBlue = Color(0xFF1E6BFF);
 const kPurple = kBlue;
@@ -26,6 +31,7 @@ const kShadow = Color(0x14373159);
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const JengaBizApp());
+  unawaited(FirebasePushService.instance.prepareBackgroundHandling());
 }
 
 class JengaBizApp extends StatelessWidget {
@@ -73,21 +79,77 @@ class Root extends StatefulWidget {
   State<Root> createState() => _RootState();
 }
 
-class _RootState extends State<Root> {
+class _RootState extends State<Root> with WidgetsBindingObserver {
   late AppScreen screen;
   late final Future<void> _databaseReady;
+  Timer? _stockRetryTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     screen = AppScreen.welcome;
-    _databaseReady = JengaDB.instance.init().catchError((_) {});
+    _databaseReady = _initializeApp();
     _initAppLocation();
+    _startPendingStockRetries();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startPendingStockRetries();
+      unawaited(_retryPendingStockUpload());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _stockRetryTimer?.cancel();
+      _stockRetryTimer = null;
+    }
+  }
+
+  void _startPendingStockRetries() {
+    _stockRetryTimer?.cancel();
+    _stockRetryTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_retryPendingStockUpload()),
+    );
+  }
+
+  Future<void> _retryPendingStockUpload() async {
+    try {
+      if (await JengaDB.instance.hasPendingStockSync()) {
+        await JengaDB.instance.syncStockWithServer();
+      }
+    } catch (_) {
+      // The retry timer will try again when connectivity returns.
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stockRetryTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeApp() async {
+    try {
+      await JengaDB.instance.init();
+      if (JengaApiService.instance.authToken != null) {
+        await FirebasePushService.instance.initialize();
+      }
+    } catch (_) {}
+    if (mounted && JengaDB.instance.shouldResumeSavedSession) {
+      setState(() => screen = AppScreen.home);
+    }
   }
 
   Future<void> _openAuth() async {
     await _databaseReady;
-    if (mounted) go(AppScreen.auth);
+    if (mounted) {
+      go(JengaDB.instance.shouldResumeSavedSession
+          ? AppScreen.home
+          : AppScreen.auth);
+    }
   }
 
   void _initAppLocation() async {
@@ -400,17 +462,16 @@ class FloatingNav extends StatelessWidget {
     final on = active == s;
     return GestureDetector(
       onTap: () => go(s),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         width: 52,
         height: 50,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(26),
-          gradient: on
-              ? const LinearGradient(
-                  colors: [Color(0xFF5A3CE5), Color(0xFF8D58EF)])
-              : null,
+          color: on ? const Color(0xFFE8F1FF) : Colors.transparent,
         ),
-        child: Icon(icon, color: on ? Colors.white : const Color(0xFF747186)),
+        child: Icon(icon, color: on ? kBlue : const Color(0xFF747186)),
       ),
     );
   }
@@ -1135,19 +1196,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  void _exportReport(double revenue, double cost, int units) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$selectedPeriod Report Exported: ${_fmt(revenue)} revenue, $units units sold',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: kBlue,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
+  Future<void> _exportReport(double revenue, double cost, int units) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final db = JengaDB.instance;
+      await InventoryPdfExportService.shareInventory(
+        items: db.items,
+        shopName: db.currentUser?.shopName ?? 'JengaBiz shop',
+        revenue: revenue,
+        cost: cost,
+        unitsSold: units,
+      );
+    } catch (_) {
+      if (!mounted || !messenger.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+            content: Text('Could not export the stock PDF. Please try again.')),
+      );
+    }
   }
 
   Widget _stat(String label, String value, String delta) => Expanded(
@@ -1421,7 +1487,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               () => widget.go(AppScreen.stock)),
           _insight(
               Icons.inventory_2_outlined,
-              'Catalog Products',
+              'Products Managed',
               '${items.length} Items',
               const Color(0xFFDFF6F4),
               const Color(0xFF246A70),
@@ -1453,10 +1519,12 @@ class ProfileScreen extends StatefulWidget {
       {super.key,
       required this.go,
       required this.unread,
-      required this.onLogout});
+      required this.onLogout,
+      this.referralSummaryLoader});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback onLogout;
+  final Future<JengaApiResponse?> Function()? referralSummaryLoader;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -1464,18 +1532,329 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _referralExpanded = false;
+  bool _referralLoading = false;
+  bool _referralLocationSaving = false;
+  bool _preferencesLoaded = false;
+  Map<String, dynamic>? _referralSummary;
+  String? _referralError;
 
   final prefs = <String, bool>{
     'Biometric login': true,
     'Push notifications': true,
-    'Weekly email report': false,
+    'Weekly email report': true,
+  };
+
+  static const _preferenceKeys = {
+    'Biometric login': 'jengabiz_pref_biometric_login',
+    'Push notifications': StockNotificationService.preferenceKey,
+    'Weekly email report': 'jengabiz_pref_weekly_email_report',
   };
 
   static const subs = {
     'Biometric login': 'Face ID or fingerprint unlock',
-    'Push notifications': 'Device alerts, sales & 50% stock sold warnings',
+    'Push notifications':
+        'Low stock, sold out and 50% sold alerts on this phone',
     'Weekly email report': 'Summary every Monday',
   };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  void _toggleReferral() {
+    final expanded = !_referralExpanded;
+    setState(() => _referralExpanded = expanded);
+    if (expanded) unawaited(_loadReferralSummary());
+  }
+
+  Future<void> _loadReferralSummary() async {
+    if (_referralLoading) return;
+    setState(() {
+      _referralLoading = true;
+      _referralError = null;
+    });
+    final response = await (widget.referralSummaryLoader?.call() ??
+        JengaApiService.instance.fetchReferralSummary());
+    if (!mounted) return;
+    if (response?.succeeded != true) {
+      setState(() {
+        _referralLoading = false;
+        _referralError =
+            'Connect to the internet to load your referral points and code.';
+      });
+      return;
+    }
+    final summary = Map<String, dynamic>.from(response!.data);
+    setState(() {
+      _referralLoading = false;
+      _referralSummary = summary;
+    });
+    if (summary['hasLocation'] != true) {
+      await _detectAndSaveReferralLocation();
+    }
+  }
+
+  Future<void> _detectAndSaveReferralLocation() async {
+    if (_referralLocationSaving) return;
+    setState(() {
+      _referralLocationSaving = true;
+      _referralError = null;
+    });
+    try {
+      final detected =
+          await LocationBiometricService.instance.detectReferralLocation();
+      if (detected == null) {
+        throw const FormatException(
+            'Turn on Location and allow access to detect your county.');
+      }
+      if (detected.countryCode != 'KE') {
+        throw const FormatException(
+            'Refer & Earn is currently available in Kenya only.');
+      }
+      final response = await JengaApiService.instance.saveReferralLocation(
+        county: detected.county,
+      );
+      if (response?.succeeded != true || response?.data['user'] is! Map) {
+        throw FormatException(response?.data['message'] as String? ??
+            'Could not save your referral location. Please try again.');
+      }
+      final user = Map<String, dynamic>.from(response!.data['user'] as Map);
+      await JengaDB.instance.persistAuthenticatedAccount(profile: user);
+      if (!mounted) return;
+      setState(() {
+        _referralLocationSaving = false;
+        _referralSummary = {
+          ...?_referralSummary,
+          'country': 'KE',
+          'county': user['county'] ?? detected.county,
+          'hasLocation': true,
+        };
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _referralLocationSaving = false;
+        _referralError = error is FormatException
+            ? error.message
+            : 'Could not detect your county. Please try again.';
+      });
+    }
+  }
+
+  Widget _referralDetails() {
+    final summary = _referralSummary;
+    if (_referralLoading && summary == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (summary == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(
+          _referralError ?? 'Referral details are not available right now.',
+          style: const TextStyle(fontSize: 12, color: kMuted),
+        ),
+      );
+    }
+
+    final points = (summary['totalPoints'] as num?)?.toInt() ?? 0;
+    final progress = (points / 200).clamp(0.0, 1.0).toDouble();
+    final hasLocation = summary['hasLocation'] == true;
+    final referralCode = summary['referralCode'] as String? ?? '';
+    final referralLink = referralCode.isEmpty
+        ? null
+        : Uri.https(
+            'jengabiz.mftechnologies.org',
+            '/',
+            {'ref': referralCode},
+          ).toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF6F8FD),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Points',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Text(
+                    '$points pts',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: kBlue,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 7,
+                  backgroundColor: const Color(0xFFE3E8F2),
+                  color: kBlue,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '$points / 200 pts  ·  ${summary['referralCount'] ?? 0} referrals',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF615E73),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!hasLocation) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _referralLocationSaving
+                  ? null
+                  : _detectAndSaveReferralLocation,
+              child: _referralLocationSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Detect my county'),
+            ),
+          ),
+        ] else if (referralLink != null) ...[
+          const SizedBox(height: 12),
+          Builder(
+            builder: (shareContext) => Material(
+              color: const Color(0xFFF6F8FD),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _shareReferralLink(referralLink, shareContext),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.share_rounded, size: 16, color: kBlue),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          referralLink,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF374151),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded,
+                            size: 16, color: kBlue),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Copy link',
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await Clipboard.setData(
+                              ClipboardData(text: referralLink));
+                          if (!mounted || !messenger.mounted) return;
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Invite link copied')),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your invite code is $referralCode. The landing page will show it so your friend can enter it after installing JengaBiz.',
+            style: const TextStyle(fontSize: 11, height: 1.4, color: kMuted),
+          ),
+        ],
+        if (_referralError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _referralError!,
+            style: const TextStyle(fontSize: 11, color: Color(0xFFD32F2F)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      final stored = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        for (final entry in _preferenceKeys.entries) {
+          prefs[entry.key] = stored.getBool(entry.value) ?? true;
+        }
+        _preferencesLoaded = true;
+      });
+      if (prefs['Push notifications'] == true) {
+        await FirebasePushService.instance.requestPermission();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _preferencesLoaded = true);
+    }
+  }
+
+  Future<void> _setPreference(String label, bool value) async {
+    setState(() => prefs[label] = value);
+    try {
+      final stored = await SharedPreferences.getInstance();
+      await stored.setBool(_preferenceKeys[label]!, value);
+      if (label == 'Push notifications' && value) {
+        await FirebasePushService.instance.requestPermission();
+      } else if (label == 'Push notifications') {
+        await FirebasePushService.instance.removeCurrentDevice();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save this preference.')),
+      );
+    }
+  }
 
   Widget _row(
       IconData icon, Color bg, Color fg, String label, VoidCallback onTap,
@@ -1542,15 +1921,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = JengaDB.instance.currentUser;
     final items = JengaDB.instance.items;
     final totalSold = items.fold<int>(0, (s, it) => s + it.unitsSold);
-    final emailPrefix =
-        (user?.email.isNotEmpty == true && user!.email.contains('@'))
-            ? user.email.split('@')[0]
-            : 'duka';
-    final referralLink = Uri.https(
-      'jengabiz.mftechnologies.org',
-      '/',
-      {'ref': emailPrefix},
-    ).toString();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 32),
@@ -1712,7 +2082,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                 subtitle: const Text('Quick unlock with Face ID or fingerprint',
                     style: TextStyle(fontSize: 11, color: kMuted)),
-                onChanged: (v) => setState(() => prefs['Biometric login'] = v),
+                onChanged: _preferencesLoaded
+                    ? (v) => _setPreference('Biometric login', v)
+                    : null,
               ),
               const Divider(height: 1, indent: 16, color: Color(0xFFF1F3F9)),
 
@@ -1728,7 +2100,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             fontSize: 13, fontWeight: FontWeight.w700)),
                     subtitle: Text(subs[e.key] ?? '',
                         style: const TextStyle(fontSize: 11, color: kMuted)),
-                    onChanged: (v) => setState(() => prefs[e.key] = v),
+                    onChanged: _preferencesLoaded
+                        ? (v) => _setPreference(e.key, v)
+                        : null,
                   ),
                   const Divider(
                       height: 1, indent: 16, color: Color(0xFFF1F3F9)),
@@ -1742,8 +2116,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => setState(
-                          () => _referralExpanded = !_referralExpanded),
+                      onTap: _toggleReferral,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
@@ -1752,31 +2125,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Refer & Earn (KES 100)',
+                                  Text('Refer & Earn',
                                       style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w700)),
-                                  SizedBox(height: 2),
-                                  Text(
-                                      'Share your invite link to earn KES 100 per verified duka',
-                                      style: TextStyle(
-                                          fontSize: 11, color: kMuted)),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE8F1FF),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text('Earn KES 100',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: kBlue)),
                             ),
                             const SizedBox(width: 4),
                             Icon(
@@ -1790,70 +2144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     if (_referralExpanded) ...[
-                      const SizedBox(height: 12),
-                      Builder(
-                        builder: (shareContext) => Material(
-                          color: const Color(0xFFF6F8FD),
-                          borderRadius: BorderRadius.circular(12),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () =>
-                                _shareReferralLink(referralLink, shareContext),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border:
-                                    Border.all(color: const Color(0xFFE2E8F4)),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.share_rounded,
-                                      size: 16, color: kBlue),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      referralLink,
-                                      style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF374151)),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.copy_rounded,
-                                        size: 16, color: kBlue),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    tooltip: 'Copy link',
-                                    onPressed: () async {
-                                      final messenger =
-                                          ScaffoldMessenger.of(context);
-                                      await Clipboard.setData(
-                                          ClipboardData(text: referralLink));
-                                      if (!mounted || !messenger.mounted) {
-                                        return;
-                                      }
-                                      messenger.showSnackBar(
-                                        const SnackBar(
-                                            content:
-                                                Text('Invite link copied')),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Tap the link to share it with an app, or use the copy button.',
-                        style: TextStyle(fontSize: 11, color: kMuted),
-                      ),
+                      _referralDetails(),
                     ],
                   ],
                 ),

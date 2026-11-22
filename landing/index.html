@@ -42,6 +42,8 @@
       .hero-copy { max-width: 500px; margin: 21px 0 28px; color: var(--muted); font-size: 17px; line-height: 1.75; }
       .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
       .download-note { margin: 12px 0 0; color: #74768d; font-size: 12px; line-height: 1.6; }
+      .referral-note { margin: 15px 0 0; padding: 13px 15px; border: 1px solid #dbe6ff; border-radius: 14px; background: #fff; color: #4c5066; font-size: 13px; line-height: 1.55; }
+      .referral-note strong { color: var(--blue); letter-spacing: .06em; }
       .hero-note { margin-top: 24px; color: #868599; font-size: 12px; }
       .hero-visual { position: relative; min-height: 440px; display: grid; place-items: center; }
       .visual-glow { position: absolute; width: min(480px, 90%); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, #d6e2ff 0, #e7edff 51%, #e7edff00 72%); }
@@ -122,10 +124,14 @@
             <h1>Keep your shop <span>moving.</span></h1>
             <p class="hero-copy">Know what is in stock, what has sold, and how your business is doing. JengaBiz brings the daily picture of your shop into one simple place.</p>
             <div class="hero-actions">
-              <a class="button" href="/downloads/v1.0.1/JengaBiz-1.0.1.apk" download="JengaBiz-1.0.1.apk">Download for Android</a>
+              <a class="button" href="/downloads/v1.0.3/JengaBiz-1.0.3.apk" download="JengaBiz-1.0.3.apk">Download for Android</a>
               <a class="button secondary" href="#features">Explore JengaBiz</a>
             </div>
-            <p class="download-note">Android release 1.0.1 · APK · <a href="/downloads/v1.0.1/JengaBiz-1.0.1.sha256">Verify the download</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/download/v1.0.1/jengabiz-android-1.0.1.apk" target="_blank" rel="noreferrer">GitHub APK mirror</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/tag/v1.0.1" target="_blank" rel="noreferrer">Release notes</a></p>
+            <p class="referral-note" id="referral-note" hidden>
+              Your JengaBiz referral code is <strong id="referral-code"></strong>.
+              Download the app, create your account, and enter this code to join the referral program.
+            </p>
+            <p class="download-note">Android release 1.0.3 · APK · <a href="/downloads/v1.0.3/JengaBiz-1.0.3.sha256">Verify the download</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/download/v1.0.3/JengaBiz-1.0.3.apk" target="_blank" rel="noreferrer">GitHub APK mirror</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/download/v1.0.3/JengaBiz-1.0.3.sha256" target="_blank" rel="noreferrer">GitHub checksum</a> · <a href="https://github.com/MuthamiM/JENGABIZ/releases/tag/v1.0.3" target="_blank" rel="noreferrer">Release notes</a></p>
             <p class="hero-note">Simple tools for shop owners. Clear records for every day.</p>
           </div>
           <div class="hero-visual" aria-label="JengaBiz shop management illustration">
@@ -173,7 +179,7 @@
             <p>JengaBiz is made by MF Technologies to help local businesses manage the details that keep a shop moving.</p>
           </div>
           <div class="band-actions">
-            <a class="button" href="/downloads/v1.0.1/JengaBiz-1.0.1.apk" download="JengaBiz-1.0.1.apk">Download JengaBiz</a>
+            <a class="button" href="/downloads/v1.0.3/JengaBiz-1.0.3.apk" download="JengaBiz-1.0.3.apk">Download JengaBiz</a>
             <a class="button secondary" href="https://mftechnologies.org" target="_blank" rel="noreferrer">Learn about MF Technologies</a>
           </div>
         </div>
@@ -193,5 +199,12 @@
         </div>
       </div>
     </footer>
+    <script>
+      const code = new URLSearchParams(window.location.search).get('ref') || '';
+      if (/^[A-Z0-9-]{4,32}$/i.test(code)) {
+        document.getElementById('referral-code').textContent = code.toUpperCase();
+        document.getElementById('referral-note').hidden = false;
+      }
+    </script>
   </body>
 </html>

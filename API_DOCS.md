@@ -27,7 +27,7 @@ The services are composed via `docker-compose.yml`:
 - **`jengabiz-landing`**: Static landing page exposed only on host loopback port `5082`.
 - **`jengabiz-redis`**: Redis 7 Alpine cache container exposed on port `6380` (internal `6379`).
 - **Business API database**: SQLite file stored at `/app/data/duka_ledger.db` in named Docker volume `jengabiz_db_data`.
-- **JengaBiz mobile account database**: SQLite file stored at `/data/jengabiz.sqlite` in named Docker volume `jengabiz_account_data`. It stores mobile account profiles, salted password hashes, sessions, and each account's stock items.
+- **JengaBiz mobile account database**: SQLite file stored at `/data/jengabiz.sqlite` in named Docker volume `jengabiz_account_data`. It stores mobile account profiles, salted password hashes, sessions, stock items, and private account-scoped product images.
 
 Cloudflare Tunnel sends the public landing hostname to port `5082`, sends `/email-auth/*` on the API hostname to port `5081`, and sends all other API paths to port `5080`. Keeping mobile account and stock paths under `/email-auth/` uses the existing tunnel route.
 
@@ -107,18 +107,42 @@ Creates a mobile account after email verification. Migration is for an account p
   "name": "Shop Owner",
   "shopName": "My Shop",
   "phone": "",
+  "county": "Nairobi",
+  "referralCode": "",
   "password": "<password>",
   "items": []
 }
 ```
 
-Successful responses return a bearer `sessionToken` and a profile without password data. Passwords are hashed server-side with scrypt and per-account random salts; account ownership is bound to the authenticated session.
+Referral code and county are optional. When a referral code is used, the Android app detects the device's location and reverse-geocodes the county; it sends the county only, and the service assigns the country as Kenya (`KE`). The inviter must have enabled location before the code can be applied. Successful responses return a bearer `sessionToken` and a profile without password data. Passwords are hashed server-side with scrypt and per-account random salts; account ownership is bound to the authenticated session.
 
 #### `POST /email-auth/login`
-Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response.
+Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. Sessions last 90 days and renew for another 90 days when an authenticated request is made.
+
+#### `GET /email-auth/me`
+Returns the signed-in account profile and renews the active session. The app uses this route on startup to resume a saved secure session without asking for the password again.
+
+#### `GET /email-auth/referrals` and `PUT /email-auth/referrals/location`
+Both routes require a bearer session. GET returns the account's opaque referral code, referred-shop counts, total JengaBiz points, points remaining to the 200-point threshold, and whether redemption is available. PUT accepts the county detected by the Android app; the service accepts only one of Kenya's supported counties and stores the country as `KE`. The app keeps GPS coordinates on-device and sends only the detected county. A county is locked after the account earns referral points so previously issued rewards cannot be changed by editing location.
+
+A referred shop must enter a valid code during signup, be detected in Kenya, and complete email verification. The account service awards 50 points when the inviter and new shop are in the same county, and 75 points when they are in different Kenyan counties. International referrals are not supported. A new account can earn once; the service rejects self-referrals that reuse the inviter's email or phone. Existing accounts receive an opaque referral code during database migration. At 200 points, the account is marked as having reached the future redemption threshold. Points are not cash, and redemption or payout is not implemented.
 
 #### `GET /email-auth/stock/items` and `PUT /email-auth/stock/items`
 Both routes require `Authorization: Bearer <sessionToken>`. GET returns only the signed-in account's inventory. PUT replaces that account's inventory in one database transaction. Payloads are capped and validated before writing.
+
+#### `GET /email-auth/stock/images/:itemId` and `PUT /email-auth/stock/images/:itemId`
+Both routes require the signed-in account's bearer token. PUT accepts a base64 JPEG, PNG, or WebP image up to 1 MB for an existing stock item; image bytes are stored in the account-scoped SQLite database, with a 32 MB image-storage limit per shop. GET streams the private image and disables caching at shared proxies. The stock item stores only the `stock-image:<itemId>` reference, never the image payload.
+
+Each stock record stores its name, category, SKU, selling and cost prices, remaining quantity, units sold, low-stock threshold, and image URL in the account SQLite database. The Flutter app also keeps an account-scoped offline copy and syncs the full inventory when connected.
+
+#### `POST /email-auth/notifications/device` and `DELETE /email-auth/notifications/device`
+Register or remove the current signed-in phone's Firebase Cloud Messaging token. Requests require a bearer session. Registration accepts `deviceToken` and `platform` (`android` or `ios`). Device tokens are stored against the authenticated account and never returned to the app. On an existing item's transition to 50%-sold, low, or zero stock, the service sends a push to other registered devices if Firebase server credentials are configured.
+
+The account service reads a Firebase service account from `FIREBASE_SERVICE_ACCOUNT_FILE` or `FIREBASE_SERVICE_ACCOUNT_JSON`. The JengaBiz server uses `deployment/secrets/jengabiz-fcm-service-account.json`, which is ignored by Git and mounted read-only into the email/account container. Its dedicated service account has only the `cloudmessaging.messages.create` permission. Never include this credential in an app build, release, or repository.
+
+Firebase Cloud Messaging is configured for the Android app (`com.dukaledger.duka_ledger`) in project `jengabiz-mftechnologies`. `flutter_app/android/app/google-services.json` and `flutter_app/lib/firebase_options.dart` contain public client configuration; the private sender key remains server-only. Stock updates send remote alerts for 50%-sold, low-stock, and out-of-stock transitions to the account's other registered devices. The device that made the change gets its local alert instead of a duplicate push.
+
+The app's Stock & Inventory and Analytics screens export a multi-page landscape PDF containing the JengaBiz logo, shop summary, all stock fields, and MF Technologies contact details (`info@mftechnologies.org`, `0748329410`, `0712742991`). The file opens the platform share/print sheet.
 
 #### `POST /email-auth/logout`
 Revokes the current bearer session.
