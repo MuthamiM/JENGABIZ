@@ -1,11 +1,11 @@
-# 🏪 Duka Ledger (JENGABIZ)
+#Duka Ledger (JENGABIZ)
 
 > **Feature-First, Multi-Platform Architecture for Kenyan Micro-Retailers & Communities**
 > Scalable to 3,000+ Concurrent Customers | Offline-First Mobile | High-Availability Distributed Backend
 
 ---
 
-## 🌟 Overview
+##  Overview
 
 **Duka Ledger** is a purpose-built commerce, credit ledger, and community discovery ecosystem designed for Kenyan **Duka** (corner retail shop) owners and **Mama Mboga** (fresh produce) vendors. It bridges offline-first edge operations with cloud synchronization and a buyer-facing community directory.
 
@@ -31,25 +31,25 @@
 
 ---
 
-## 📁 Repository Structure
+##  Repository Structure
 
 ```
 JENGABIZ/
-├── backend/            # 🐍 Python (FastAPI, SQLAlchemy, Redis, Celery) - Primary Backend
-├── backend-csharp/     # 🟣 C# (.NET 8 ASP.NET Core Web API) - Enterprise Backend
-├── backend-java/       # ☕ Java (Spring Boot 3, JPA, Flyway) - Enterprise Backend
-├── mobile-flutter/     # 🎯 Dart/Flutter (Android & iOS) - Offline-first Cross-Platform Client
-├── android-kotlin/     # 🤖 Kotlin (Android Jetpack, Room, Hilt) - Native Android Client
-├── ios-swift/          # 🍎 Swift (SwiftUI, Combine, CoreData) - Native iPhone Client
-├── frontend-web/       # 🌐 TypeScript (Next.js 14, React, Tailwind) - Buyer Discovery Portal
-├── docs/               # 📚 Architectural, Scaling, and API Documentation
-├── docker-compose.yml  # 🐳 Multi-service orchestration for development & production
-└── Makefile            # 🛠️ Unified project task runner
+├── backend/            # Python (FastAPI, SQLAlchemy, Redis, Celery) - Primary Backend
+├── backend-csharp/     #  C# (.NET 8 ASP.NET Core Web API) - Enterprise Backend
+├── backend-java/       # Java (Spring Boot 3, JPA, Flyway) - Enterprise Backend
+├── mobile-flutter/     #  Dart/Flutter (Android & iOS) - Offline-first Cross-Platform Client
+├── android-kotlin/     #  Kotlin (Android Jetpack, Room, Hilt) - Native Android Client
+├── ios-swift/          #  Swift (SwiftUI, Combine, CoreData) - Native iPhone Client
+├── frontend-web/       #  TypeScript (Next.js 14, React, Tailwind) - Buyer Discovery Portal
+├── docs/               # Architectural, Scaling, and API Documentation
+├── docker-compose.yml  # Multi-service orchestration for development & production
+└── Makefile            #  Unified project task runner
 ```
 
 ---
 
-## 🚀 Git Branches
+## Git Branches
 
 - `main` - Stable, production-ready releases
 - `martindev` - Active feature branch for Martin
@@ -57,7 +57,7 @@ JENGABIZ/
 
 ---
 
-## ⚡ Scaling to 3,000+ Concurrent Customers
+## Scaling to 3,000+ Concurrent Customers
 
 The backend architecture is engineered to effortlessly sustain **3,000+ concurrent active customers**:
 1. **Async Non-Blocking I/O**: FastAPI with `uvloop` & `asyncpg` / ASP.NET Core minimal APIs.
@@ -72,7 +72,7 @@ The backend architecture is engineered to effortlessly sustain **3,000+ concurre
 
 ---
 
-## 🛠️ Quick Start
+##  Quick Start
 
 ```bash
 # Clone the repository
