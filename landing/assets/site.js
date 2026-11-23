@@ -86,8 +86,12 @@
       })
       .then((release) => {
         if (typeof release.version_name === 'string') {
+          const versionName = release.version_name.trim();
+          const versionLabel = versionName.startsWith('v')
+            ? versionName
+            : `v${versionName}`;
           latestVersionLabels.forEach((label) => {
-            label.textContent = release.version_name;
+            label.textContent = versionLabel;
           });
         }
         const versionCode = Number(release.version_code);
