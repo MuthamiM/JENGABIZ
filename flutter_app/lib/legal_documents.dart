@@ -19,7 +19,7 @@ const jengaBizTerms = LegalDocument(
   sections: [
     LegalSection(
       'About JengaBiz',
-      'JengaBiz is provided by MF Technologies to help shopkeepers in Kenya record and review stock, sales activity, and business information. During sign-up, the required agreement records your acceptance of these Terms, the Privacy Policy, and the essential app storage described in Cookies & App Storage. The native app does not show a browser-cookie banner. JengaBiz is a recordkeeping tool, not a bank, payment service, tax adviser, accountant, or legal adviser.',
+      'JengaBiz is provided by MF Technologies to help shopkeepers in Kenya record and review stock, sales activity, and business information. During sign-up, the required agreement records your acceptance of these Terms and the Privacy Policy. Essential on-device storage for sign-in, settings, cached records, and images is described in the Privacy Policy. JengaBiz is a recordkeeping tool, not a bank, payment service, tax adviser, accountant, or legal adviser.',
     ),
     LegalSection(
       'Your account and security',
@@ -98,32 +98,6 @@ const jengaBizPrivacy = LegalDocument(
     LegalSection(
       'Security and updates',
       'We use reasonable safeguards, including encrypted connections for public services, password hashing, restricted account access, and Android secure storage for session credentials. No online service or device can be guaranteed completely secure. Use a device lock and do not share passwords or verification codes. We update this policy when our information practices change.',
-    ),
-  ],
-);
-
-const jengaBizCookiesAndStorage = LegalDocument(
-  title: 'Cookies & App Storage',
-  sections: [
-    LegalSection(
-      'Website cookie',
-      'The JengaBiz website uses one first-party necessary cookie named jengabiz_site_consent to remember that you have seen the cookie notice. It is set after you choose “Continue with necessary cookie”, lasts for up to 180 days, and uses Secure on HTTPS pages and SameSite=Lax. The site does not use advertising, analytics, or cross-site tracking cookies. A referral code in a page link is displayed for sign-up and is not saved in a cookie.',
-    ),
-    LegalSection(
-      'Website cookie choices',
-      'The website currently has no optional cookie categories to enable. If you do not choose the notice button, the preference is not saved and the notice may appear again. Use Cookie settings in the website footer to reopen the notice, or remove the cookie in your browser’s site-data settings.',
-    ),
-    LegalSection(
-      'Storage used by the Android app',
-      'The Android app is native and does not use browser cookies for sign-in, analytics, or advertising. It uses Android secure storage for the session credential; on-device preferences for settings and the version/time that you accepted Terms and essential app storage during sign-up; a local cache for shop data and product images; and a push-notification device token when push alerts are enabled. The app has no separate cookie banner.',
-    ),
-    LegalSection(
-      'Managing app storage',
-      'Change notification preferences in your app profile and Android settings. Android controls location and photo permissions. Clearing app storage or uninstalling removes local preferences and cached information. Shop data already synced to your account remains on the service, but pending offline changes can be lost if the local copy is removed before syncing.',
-    ),
-    LegalSection(
-      'Other websites and contact',
-      'GitHub, MF Technologies, and other linked sites have their own cookie and privacy practices. This policy covers JengaBiz only. For questions, contact info@mftechnologies.org or call 0748 329 410 or 0712 742 991.',
     ),
   ],
 );

@@ -23,6 +23,21 @@ class _StockScreenState extends State<StockScreen> {
   StockSort _sort = StockSort.stockLow;
 
   @override
+  void initState() {
+    super.initState();
+    _syncInventoryOnOpen();
+  }
+
+  Future<void> _syncInventoryOnOpen() async {
+    try {
+      final synced = await JengaDB.instance.syncStockWithServer();
+      if (mounted && synced) setState(() {});
+    } catch (_) {
+      // Keep the cached inventory visible and retry on the next app resume.
+    }
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
@@ -580,27 +595,27 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Widget _buildItemCard(StockItem item) {
-    const cardBg = Colors.white;
-    const defaultBorder = Color(0xFFECEEF5);
+    const blue = Color(0xFF1E6BFF);
+    const defaultBorder = Color(0xFFE7EAF2);
     Color statusColor;
     String statusText;
     if (item.isOutOfStock) {
       statusColor = const Color(0xFFD32F2F);
-      statusText = 'Out of Stock (0)';
+      statusText = 'OUT OF STOCK';
     } else if (item.isLowStock) {
       statusColor = const Color(0xFFE65100);
-      statusText = 'Low Stock (${item.stockRemaining} left)';
+      statusText = 'LOW STOCK';
     } else {
       statusColor = const Color(0xFF2E7D32);
-      statusText = 'In Stock (${item.stockRemaining})';
+      statusText = 'IN STOCK';
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: item.isLowStock
               ? const Color(0xFFFFD180)
@@ -608,157 +623,172 @@ class _StockScreenState extends State<StockScreen> {
         ),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x06000000),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            color: Color(0x05000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Real Product Image
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: 70,
-              height: 70,
-              child: _stockPhoto(item),
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child:
+                    SizedBox(width: 58, height: 58, child: _stockPhoto(item)),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
-                          color: Color(0xFF17162A),
-                        ),
+                    Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF17162A),
                       ),
                     ),
+                    const SizedBox(height: 4),
                     Text(
                       'KES ${item.price.toStringAsFixed(0)}',
                       style: const TextStyle(
                         fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF1E6BFF),
+                        fontWeight: FontWeight.w800,
+                        color: blue,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
+                    const SizedBox(height: 3),
                     Text(
-                      item.sku,
+                      [if (item.sku.isNotEmpty) item.sku, item.category]
+                          .join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF908D9F),
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '• ${item.category}',
-                      style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF908D9F)),
-                    ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Product actions',
+                icon: const Icon(Icons.more_vert_rounded,
+                    color: Color(0xFF747186)),
+                onSelected: (action) {
+                  if (action == 'edit') {
+                    _showProductEditor(item: item);
+                  } else if (action == 'remove') {
+                    _confirmDelete(item);
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(children: [
+                      Icon(Icons.edit_outlined, size: 19),
+                      SizedBox(width: 10),
+                      Text('Edit product'),
+                    ]),
+                  ),
+                  PopupMenuItem(
+                    value: 'remove',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline_rounded,
+                          size: 19, color: Color(0xFFD32F2F)),
+                      SizedBox(width: 10),
+                      Text('Remove product'),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 11),
+          const Divider(height: 1, color: Color(0xFFECEEF5)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
+                        color: statusColor.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(7),
                       ),
                       child: Text(
                         statusText,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
+                          letterSpacing: 0.35,
                           fontWeight: FontWeight.w800,
                           color: statusColor,
                         ),
                       ),
                     ),
-                    if (item.isHalfSold)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFFDE68A)),
-                        ),
-                        child: Text(
-                          '${item.soldPercentage}% Sold',
-                          style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFB45309),
-                          ),
-                        ),
-                      ),
+                    const SizedBox(height: 5),
                     Text(
-                      'Sold: ${item.unitsSold}',
+                      '${item.unitsSold} sold${item.isHalfSold ? '  ·  ${item.soldPercentage}% moved' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF706C81),
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-
-          // Quick Stock adjuster
-          const SizedBox(width: 6),
-          Column(
-            children: [
-              _circleBtn(
-                Icons.add_rounded,
-                const Color(0xFF1E6BFF),
-                () => _changeStock(item, 1),
-                tooltip: 'Restock one unit',
               ),
-              const SizedBox(height: 4),
-              _circleBtn(
-                Icons.edit_outlined,
-                const Color(0xFF706C81),
-                () => _showProductEditor(item: item),
-                tooltip: 'Edit product details and quantity',
-              ),
-              const SizedBox(height: 4),
-              _circleBtn(
+              _stockAdjustButton(
                 Icons.remove_rounded,
                 const Color(0xFFE65100),
                 () => _changeStock(item, -1),
                 tooltip: 'Record one sale',
               ),
-              const SizedBox(height: 4),
-              _circleBtn(Icons.delete_outline_rounded, const Color(0xFFD32F2F),
-                  () => _confirmDelete(item),
-                  tooltip: 'Remove product'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 9),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${item.stockRemaining}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        height: 1.05,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF17162A),
+                      ),
+                    ),
+                    const Text(
+                      'LEFT',
+                      style: TextStyle(
+                        fontSize: 8,
+                        letterSpacing: 0.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF908D9F),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _stockAdjustButton(
+                Icons.add_rounded,
+                blue,
+                () => _changeStock(item, 1),
+                tooltip: 'Restock one unit',
+              ),
             ],
           ),
         ],
@@ -772,21 +802,21 @@ class _StockScreenState extends State<StockScreen> {
             JengaDB.instance.inventoryOwnerId,
       );
 
-  Widget _circleBtn(IconData icon, Color col, VoidCallback onTap,
+  Widget _stockAdjustButton(IconData icon, Color col, VoidCallback onTap,
       {required String tooltip}) {
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: col.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
+      child: Material(
+        color: col.withValues(alpha: 0.10),
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Icon(icon, size: 20, color: col),
           ),
-          child: Icon(icon, size: 18, color: col),
         ),
       ),
     );

@@ -46,7 +46,7 @@ class JengaApiService {
   // Override for local development with --dart-define=JENGABIZ_API_BASE_URL=...
   String baseUrl = const String.fromEnvironment(
     'JENGABIZ_API_BASE_URL',
-    defaultValue: 'https://jengabiz-api.mftechnologies.org',
+    defaultValue: 'https://jengabiz.mftechnologies.org',
   );
   String? authToken;
   String? sessionEmail;

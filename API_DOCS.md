@@ -9,27 +9,29 @@ The JENGABIZ backend is built on **C# ASP.NET Core 8.0** with **Entity Framework
 | Environment | Base URL |
 | :--- | :--- |
 | **Public Landing Page** | `https://jengabiz.mftechnologies.org` |
-| **Production API** | `https://jengabiz-api.mftechnologies.org` |
+| **Production Mobile API** | `https://jengabiz.mftechnologies.org` |
+| **Legacy Production API Host** | `https://jengabiz-api.mftechnologies.org` |
 | **Local Host / API** | `http://localhost:5080` |
 | **Swagger Interactive UI** | `http://localhost:5080/swagger` |
 | **Swagger OpenAPI JSON** | `http://localhost:5080/swagger/v1/swagger.json` |
 | **Android Emulator** | `http://10.0.2.2:5080` |
 | **Physical Phone (USB / LAN)** | `http://<HOST_IP>:5080` (or `adb reverse tcp:5080 tcp:5080`) |
-| **Docker Network** | `http://jengabiz-api:5080` |
+| **Docker Gateway** | `http://jengabiz-api-gateway:80` |
 
 ---
 
 ## 2. Docker Architecture
 
 The services are composed via `docker-compose.yml`:
-- **`jengabiz-api`**: C# .NET 8 Web API container exposed on port `5080`.
+- **`jengabiz-api`**: C# .NET 8 Web API container on the Docker network at port `5080`.
+- **`jengabiz-api-gateway`**: Nginx gateway exposed on host port `5080`; it routes `/email-auth/*` to the account service and all other paths to the C# API.
 - **`jengabiz-email-otp`**: Email verification service exposed only on host loopback port `5081`.
 - **`jengabiz-landing`**: Static landing page exposed only on host loopback port `5082`.
 - **`jengabiz-redis`**: Redis 7 Alpine cache container exposed on port `6380` (internal `6379`).
 - **Business API database**: SQLite file stored at `/app/data/duka_ledger.db` in named Docker volume `jengabiz_db_data`.
 - **JengaBiz mobile account database**: SQLite file stored at `/data/jengabiz.sqlite` in named Docker volume `jengabiz_account_data`. It stores mobile account profiles, salted password hashes, sessions, stock items, and private account-scoped product images.
 
-Cloudflare Tunnel sends the public landing hostname to port `5082`, sends `/email-auth/*` on the API hostname to port `5081`, and sends all other API paths to port `5080`. Keeping mobile account and stock paths under `/email-auth/` uses the existing tunnel route.
+Cloudflare Tunnel sends the public landing hostname to port `5082` and the legacy API hostname to the gateway on port `5080`. The landing Nginx also proxies `/email-auth/*`, `/catalog/*`, `/summary/*`, `/sync/*`, and `/health` to the gateway. Mobile app requests use the landing hostname so account sync does not depend on a separate API DNS record. The gateway sends `/email-auth/*` to the Node account service on the Docker network at port `5081`, and all other API paths to the C# API. Both Nginx proxies preserve Cloudflare client IP headers for account rate limits.
 
 To start or restart the stack:
 ```bash
@@ -117,7 +119,7 @@ Creates a mobile account after email verification. Migration is for an account p
 Referral code and county are optional. When a referral code is used, the Android app detects the device's location and reverse-geocodes the county; it sends the county only, and the service assigns the country as Kenya (`KE`). The inviter must have enabled location before the code can be applied. Successful responses return a bearer `sessionToken` and a profile without password data. Passwords are hashed server-side with scrypt and per-account random salts; account ownership is bound to the authenticated session.
 
 #### `POST /email-auth/login`
-Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. Sessions last 90 days and renew for another 90 days when an authenticated request is made.
+Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. Sessions remain valid until the user signs out or the server revokes the session. The server stores only the token hash; the Android app stores the token in secure storage.
 
 #### `GET /email-auth/me`
 Returns the signed-in account profile and renews the active session. The app uses this route on startup to resume a saved secure session without asking for the password again.

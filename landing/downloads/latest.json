@@ -1,11 +1,13 @@
 {
-  "version_name": "1.0.7",
-  "version_code": 8,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/latest/JengaBiz.apk?v=8",
-  "sha256": "ca647ba577069066419237463faabf79507e04e276cf4daf5e8ba86a2c15d87d",
+  "version_name": "1.1.0",
+  "version_code": 11,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.0/JengaBiz-1.1.0.apk",
+  "sha256": "ea1cb437c54ad06716d7ff280b550e5795028de0dadf9c093d642c1ac87b251d",
   "release_notes": [
-    "Welcome-screen icons now clearly represent inventory and stock alerts.",
-    "Both icons use the JengaBiz blue palette and a consistent visual style.",
-    "Updates remain available from the in-app updater."
+    "Account, referral, and stock sync now use the main JengaBiz hostname.",
+    "Saved stock loads automatically after sign-in, app startup, resume, and opening Stock.",
+    "Removed the manual Load saved stock button; offline inventory remains cached and retries automatically.",
+    "An empty offline cache cannot replace a populated account inventory.",
+    "Terms of Use and Privacy Policy remain in the app; Cookies & App Storage was removed."
   ]
 }

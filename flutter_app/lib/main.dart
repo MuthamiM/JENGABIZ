@@ -112,6 +112,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _startPendingStockRetries();
+      unawaited(_syncAccountInventoryOnResume());
       unawaited(_retryPendingStockUpload());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
@@ -135,6 +136,16 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       }
     } catch (_) {
       // The retry timer will try again when connectivity returns.
+    }
+  }
+
+  Future<void> _syncAccountInventoryOnResume() async {
+    try {
+      if (JengaApiService.instance.authToken != null) {
+        await JengaDB.instance.syncStockWithServer();
+      }
+    } catch (_) {
+      // A failed pull leaves the account's local inventory available offline.
     }
   }
 
@@ -1635,14 +1646,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _referralLoading = true;
       _referralError = null;
     });
-    final response = await (widget.referralSummaryLoader?.call() ??
-        JengaApiService.instance.fetchReferralSummary());
+    JengaApiResponse? response;
+    try {
+      response = await (widget.referralSummaryLoader?.call() ??
+          JengaApiService.instance.fetchReferralSummary());
+    } catch (_) {
+      // Keep the profile usable if the request transport fails unexpectedly.
+    }
     if (!mounted) return;
     if (response?.succeeded != true) {
       setState(() {
         _referralLoading = false;
-        _referralError =
-            'Connect to the internet to load your referral points and code.';
+        _referralError = _referralLoadError(response);
       });
       return;
     }
@@ -1654,6 +1669,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (summary['hasLocation'] != true) {
       await _detectAndSaveReferralLocation();
     }
+  }
+
+  String _referralLoadError(JengaApiResponse? response) {
+    if (response == null) {
+      return 'Could not reach JengaBiz. Check your connection and try again.';
+    }
+    if (response.statusCode == 401) {
+      return 'Your sign-in session is no longer valid. Sign in again to load referral points.';
+    }
+    final message = response.data['message'];
+    if (message is String && message.trim().isNotEmpty) return message.trim();
+    if (response.statusCode >= 500) {
+      return 'The referral service is temporarily unavailable. Try again shortly.';
+    }
+    return 'Referral points could not be loaded (error ${response.statusCode}). Try again.';
   }
 
   Future<void> _detectAndSaveReferralLocation() async {
@@ -1714,9 +1744,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (summary == null) {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
-        child: Text(
-          _referralError ?? 'Referral details are not available right now.',
-          style: const TextStyle(fontSize: 12, color: kMuted),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _referralError ?? 'Referral details are not available right now.',
+              style: const TextStyle(fontSize: 12, color: kMuted),
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _referralLoading ? null : _loadReferralSummary,
+                icon: const Icon(Icons.refresh_rounded, size: 17),
+                label: const Text('Try again'),
+                style: TextButton.styleFrom(
+                  foregroundColor: kBlue,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }

@@ -17,7 +17,7 @@ The email verification API has focused server tests. Run from the project root:
 node --test backend/email-otp/server.test.mjs
 ```
 
-The phone keeps an offline profile and inventory cache. The production account service stores profiles, scrypt password hashes, revocable sessions, and per-account stock rows in the persistent `jengabiz_account_data` SQLite volume. Passwords are never sent to the C# catalog API or written in plaintext. New accounts require a short-lived, single-use email verification grant; older phone-only accounts can migrate after verifying the same email. Email codes expire after 10 minutes, resend is throttled, and verification allows at most five attempts. Phone number is optional and is never used for verification. Signed-in sessions resume after closing the app; authenticated activity renews the session for up to 90 days. Sign out explicitly to end a session. Fingerprint/face sign-in remains available as an optional method after sign-out.
+The phone keeps an offline profile and inventory cache. The production account service stores profiles, scrypt password hashes, revocable sessions, and per-account stock rows in the persistent `jengabiz_account_data` SQLite volume. Passwords are never sent to the C# catalog API or written in plaintext. New accounts require a short-lived, single-use email verification grant; older phone-only accounts can migrate after verifying the same email. Email codes expire after 10 minutes, resend is throttled, and verification allows at most five attempts. Phone number is optional and is never used for verification. Signed-in sessions remain valid until sign-out or server revocation and resume after closing the app. Sign out explicitly to end the current device session. Fingerprint/face sign-in remains available as an optional method after sign-out.
 
 ## Release smoke checks
 
@@ -27,6 +27,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Resend a code, confirm the prior code no longer works, then verify the newest code and confirm the dashboard opens.
 - Sign out, then test email/password sign-in and fingerprint sign-in separately; confirm fingerprint sign-in is an underlined link below the main button.
 - Sign in, close and reopen the app, and confirm the secure session returns directly to the shop dashboard without another password prompt. Confirm a lost connection still opens the locally cached inventory and synchronizes later.
+- Keep a signed-in session idle beyond 90 days, then reconnect; the session remains valid until explicit sign-out or server revocation.
 - Create an account and sign in from a second device; confirm the same profile and stock are returned from the server database.
 - Sign in to an existing phone-only account, verify the email code, and confirm the local profile and inventory migrate without replacing existing server records.
 - Adjust stock while online, sign in on another device, and confirm each user's items stay isolated. Repeat an adjustment offline and confirm it syncs after sign-in.
@@ -44,7 +45,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Confirm Biometric login, Push notifications, and Weekly email report default to on, remain saved after app restart, and preserve a user's explicit off selection.
 - On Android 13 or later, allow notification permission. Sell through 50% of a product's starting stock, reduce another item from above its reorder point to low stock, and then to zero; confirm local alerts appear. With Firebase configured, repeat from another signed-in phone and confirm server-delivered FCM alerts arrive. Turn notifications off and confirm the device is deregistered and receives no more remote stock alerts.
 - Add the JengaBiz Stock widget from the Android home-screen widget picker; verify item, unit, and low-stock counts update after changing stock, and tapping the widget opens the app.
-- Disable network access during startup and verify the app remains usable with cached inventory or presents the startup retry screen.
+- Disable network access during startup and verify the app remains usable with cached inventory; restore network access and confirm it retries inventory sync automatically.
 - Download the APK from `https://jengabiz.mftechnologies.org/` and from the GitHub release. Confirm both responses are APK bytes with `application/vnd.android.package-archive`, and compare the SHA-256 file.
 - Check the public landing and API hostnames from outside the local network. They must have a trusted HTTPS certificate; users do not install a self-signed certificate.
 - Open the landing page, Terms, Privacy, and Cookies & App Storage pages. Confirm they use the app's blue/neutral palette and each page has the cookie notice controls.
@@ -52,13 +53,13 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Release versions `1.0.6+7` and `1.0.7+8` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, and `1.1.0+11` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
-Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing-page download uses `/downloads/latest/JengaBiz.apk`; future app versions can update that APK and the manifest while keeping the same link.
+Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing page uses the versioned APK URL in the manifest with immutable caching; `/downloads/latest/JengaBiz.apk` remains the stable fallback path.
 
 ## Deployment dependency
 
-The production API URL defaults to `https://jengabiz-api.mftechnologies.org`. The marketing page is served at `https://jengabiz.mftechnologies.org/`. Email OTP, account, and account-scoped stock endpoints use `/email-auth/*` and route to the account service on port 5081; the existing C# API remains on port 5080.
+The mobile API URL defaults to `https://jengabiz.mftechnologies.org`; landing Nginx proxies `/email-auth/*` to the API gateway and account service. Other mobile API paths are forwarded to the C# API. The separate `https://jengabiz-api.mftechnologies.org` hostname remains available for direct API access.
 
 The landing, API, and email OTP routes are live. Server-side Resend credentials and a sender address on the configured custom domain are stored in the ignored root `.env`; never place them in Flutter code or a mobile build. The email container uses IPv4 DNS resolution for Resend because the host's Docker network has no usable IPv6 route. Keep the sender domain's sending records verified; receive-only MX records are not required by this app. For local development, set `JENGABIZ_API_BASE_URL` with `--dart-define` to a local API URL.
 
@@ -94,8 +95,36 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - Added a stable latest APK path and version manifest so updater-enabled versions can install the latest release directly.
 - Release `1.0.6+7` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,525,470 bytes; SHA-256 is `9bc42be00a7e1530418e30b7b2e04fe4ff7a17cc13a16f4b103a60bc1299cb4f`.
 
-## Current in-app update (2026-11-23; v1.0.7+8)
+## Previous in-app update (2026-11-23; v1.0.7+8)
 
 - Replaced the welcome screen's generic bar-chart and settings icons with outlined inventory and alert icons, both using one pale-blue tile style.
 - Updated `/downloads/latest.json` and the stable latest APK path; v1.0.6 and newer can install this update from the in-app updater.
 - APK is signed as `com.dukaledger.duka_ledger` with the existing release certificate. Size is 27,525,440 bytes; SHA-256 is `ca647ba577069066419237463faabf79507e04e276cf4daf5e8ba86a2c15d87d`.
+
+## Previous in-app update (2026-11-23; v1.0.8+9)
+
+- Refer & Earn now distinguishes connection failures, invalid/revoked sessions, and API errors instead of showing a generic internet message for every failure.
+- Added a Retry control to reload referral points while the section is open.
+- Account sessions now stay valid until sign-out or server revocation. Existing live session records are migrated in place after a verified SQLite backup.
+- Redesigned stock cards to keep product name, price, category, status, units sold, and remaining quantity readable with direct sale/restock buttons and a single Edit/Remove menu.
+- Versioned APK URLs use immutable caching so the landing-page and in-app downloads can reuse a verified release file.
+- Add to manual QA: verify stock cards at a narrow phone width, use minus/plus and the product menu, and confirm the visible stock values update. Confirm the user can still open the app after a long idle period and that logout revokes the session.
+- Release `1.0.8+9` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,574,433 bytes; SHA-256 is `44359220ec391e086fdf3387935f348c35080842d3152cb16ceaad38487acac7`.
+
+## Previous in-app update (2026-11-23; v1.0.9+10)
+
+- Public API gateway now forwards `/email-auth/*` to the account service while keeping the existing C# API routes available. Public unauthenticated stock requests return the expected account-service 401 response.
+- Stock sync retries when a signed-in app resumes. An empty offline cache cannot replace a populated server inventory.
+- Removed the Cookies & App Storage link from the app; Terms of Use and Privacy Policy remain.
+- Retained the referral failure details, Retry control, persistent sessions, and compact stock cards from v1.0.8.
+- Landing-page and in-app downloads point to the versioned APK path, which Cloudflare confirms as a cache hit after the first request.
+- The target account's server inventory was backed up and seeded with 23 additional sample electronics/accessory products (24 rows total). Other account, session, reward, and stock counts were unchanged.
+- Release `1.0.9+10` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,572,062 bytes; SHA-256 is `20f2234a20da11daa821bcc6f50e1ed91e8c6db76c9e1720f705a67bea5fd558`.
+
+## Current in-app update (2026-11-23; v1.1.0+11)
+
+- Mobile account, referral, stock, and image requests now use the landing-page hostname; Nginx proxies those requests to the existing API gateway and account service.
+- The stock screen automatically syncs when opened. Concurrent startup, resume, and screen-entry syncs share one request, and an empty offline cache cannot replace a populated server inventory.
+- Removed the manual “Load saved stock” action. Sign-in, startup, app resume, and opening Stock trigger inventory sync automatically.
+- Removed the Cookies & App Storage profile/auth links; Terms of Use and Privacy Policy remain in the app.
+- Release `1.1.0+11` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,571,745 bytes; SHA-256 is `ea1cb437c54ad06716d7ff280b550e5795028de0dadf9c093d642c1ac87b251d`.

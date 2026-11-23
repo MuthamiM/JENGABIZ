@@ -140,7 +140,7 @@ class JengaDB {
   String? inventoryOwnerId;
   bool isInitialized = false;
   bool shouldResumeSavedSession = false;
-  bool _stockSyncInProgress = false;
+  Future<bool>? _stockSyncFuture;
   String nearestHubName = 'Industrial Area Logistics Point';
   double nearestHubDistanceKm = 4.2;
   double? latitude;
@@ -440,7 +440,7 @@ class JengaDB {
     }
 
     // The saved profile remains usable offline. Keep the secure token so the
-    // next connected request can refresh the rolling session or reject it.
+    // next connected request can refresh or reject the session.
     if (cachedUser != null) {
       currentUser = cachedUser;
       shouldResumeSavedSession = true;
@@ -448,14 +448,15 @@ class JengaDB {
   }
 
   /// Pull a user's database inventory, or upload the local copy for a new account.
-  Future<bool> syncStockWithServer() async {
-    if (_stockSyncInProgress) return false;
-    _stockSyncInProgress = true;
-    try {
-      return await _performStockSync();
-    } finally {
-      _stockSyncInProgress = false;
-    }
+  Future<bool> syncStockWithServer() {
+    final activeSync = _stockSyncFuture;
+    if (activeSync != null) return activeSync;
+
+    final sync = _performStockSync().whenComplete(() {
+      _stockSyncFuture = null;
+    });
+    _stockSyncFuture = sync;
+    return sync;
   }
 
   Future<bool> hasPendingStockSync() async {
@@ -475,6 +476,18 @@ class JengaDB {
     final syncKey = _stockSyncKey(currentUser!.id);
     final hasPendingLocalChanges = prefs.getBool(syncKey) ?? false;
     if (hasPendingLocalChanges && inventoryOwnerId == currentUser!.id) {
+      // Never let an empty offline cache replace a populated account inventory.
+      if (items.isEmpty) {
+        final remoteItems = await api.fetchAccountStock();
+        if (remoteItems == null) return false;
+        if (remoteItems.isNotEmpty) {
+          items = remoteItems.map(StockItem.fromJson).toList();
+          inventoryOwnerId = currentUser!.id;
+          await _persistItemsLocally();
+          await prefs.setBool(syncKey, false);
+          return true;
+        }
+      }
       final saved = await _replaceAccountStock(
         api,
         sourceDeviceToken: FirebasePushService.instance.currentToken,

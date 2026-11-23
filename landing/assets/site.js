@@ -97,8 +97,21 @@
         const versionCode = Number(release.version_code);
         if (Number.isSafeInteger(versionCode) && versionCode > 0) {
           const cacheKey = encodeURIComponent(String(versionCode));
+          let apkPath = `/downloads/latest/JengaBiz.apk?v=${cacheKey}`;
+          if (typeof release.apk_url === 'string') {
+            try {
+              const apkUrl = new URL(release.apk_url, window.location.href);
+              if (
+                apkUrl.origin === window.location.origin &&
+                /^\/downloads\/v\d+\.\d+\.\d+\/[^/]+\.apk$/i.test(apkUrl.pathname)
+              ) {
+                apkPath = apkUrl.pathname;
+              }
+            } catch (_) {}
+          }
           latestApkLinks.forEach((link) => {
-            link.href = `/downloads/latest/JengaBiz.apk?v=${cacheKey}`;
+            link.href = apkPath;
+            link.download = 'JengaBiz.apk';
           });
           latestChecksumLinks.forEach((link) => {
             link.href = `/downloads/latest/JengaBiz.sha256?v=${cacheKey}`;

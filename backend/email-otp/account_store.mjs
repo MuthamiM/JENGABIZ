@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 
-// Keep shop sessions for up to 90 days, extending the expiry on active use.
-const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+// Sessions stay valid until explicitly revoked. Keep the existing schema field
+// at the largest safe integer for compatibility with older server builds.
+const PERSISTENT_SESSION_EXPIRY = Number.MAX_SAFE_INTEGER;
 const MAX_ITEMS = 5000;
 const DUMMY_SALT = Buffer.alloc(16, 0x5a);
 const DUMMY_HASH = scryptSync('not-a-real-password', DUMMY_SALT, 64);
@@ -85,8 +86,11 @@ export function initializeAccountStore(db) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS referral_rewards_referrer_idx ON referral_rewards(referrer_account_id);
-    PRAGMA user_version = 2;
+    PRAGMA user_version = 3;
   `);
+
+  db.prepare('UPDATE sessions SET expires_at = ? WHERE expires_at <> ?')
+    .run(PERSISTENT_SESSION_EXPIRY, PERSISTENT_SESSION_EXPIRY);
 
   const accountColumns = new Set(
     db.prepare('PRAGMA table_info(accounts)').all().map((column) => column.name),
@@ -229,7 +233,7 @@ export function createAccountStore(db, { now = Date.now } = {}) {
     const token = randomBytes(32).toString('base64url');
     const timestamp = now();
     db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-      .run(hashToken(token), accountId, timestamp + SESSION_TTL_MS, timestamp);
+      .run(hashToken(token), accountId, PERSISTENT_SESSION_EXPIRY, timestamp);
     return token;
   }
 
@@ -407,12 +411,9 @@ export function createAccountStore(db, { now = Date.now } = {}) {
       FROM sessions JOIN accounts ON accounts.id = sessions.account_id
       WHERE sessions.token_hash = ?
     `).get(tokenHash);
-    if (!row || row.expires_at <= now()) {
-      db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
-      return null;
-    }
+    if (!row) return null;
     db.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?')
-      .run(now() + SESSION_TTL_MS, tokenHash);
+      .run(PERSISTENT_SESSION_EXPIRY, tokenHash);
     return { id: row.account_id, user: profile(row), tokenHash };
   }
 

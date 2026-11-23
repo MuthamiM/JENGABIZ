@@ -292,7 +292,7 @@ test('stock images require a signed-in shop and stay isolated to that account', 
   });
 });
 
-test('active sessions roll forward for 90 days and can restore the profile', async () => {
+test('sessions remain valid until explicitly revoked', async () => {
   let currentTime = 1_000_000;
   const day = 24 * 60 * 60 * 1000;
   await withService({
@@ -319,15 +319,18 @@ test('active sessions roll forward for 90 days and can restore the profile', asy
     });
     const token = registered.body.sessionToken;
 
-    currentTime += 89 * day;
+    currentTime += 5 * 365 * day;
     const restored = await request(baseUrl, '/email-auth/me', { token });
     assert.equal(restored.status, 200);
     assert.equal(restored.body.user.email, 'musa@example.com');
-
-    currentTime += 89 * day;
     assert.equal((await request(baseUrl, '/email-auth/stock/items', { token })).status, 200);
 
-    currentTime += 91 * day;
+    const signedOut = await request(baseUrl, '/email-auth/logout', {
+      method: 'POST',
+      token,
+      payload: {},
+    });
+    assert.equal(signedOut.status, 200);
     assert.equal((await request(baseUrl, '/email-auth/me', { token })).status, 401);
   });
 });

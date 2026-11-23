@@ -22,7 +22,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool isSignUp = true;
   bool isVerifyingCode = false;
   bool _needsAccountMigration = false;
-  bool _acceptedTermsAndStorage = false;
+  bool _acceptedTerms = false;
 
   final _nameCtrl = TextEditingController();
   final _shopCtrl = TextEditingController();
@@ -74,9 +74,9 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
-      if (isSignUp && !_acceptedTermsAndStorage) {
+      if (isSignUp && !_acceptedTerms) {
         throw const FormatException(
-          'Agree to the Terms of Use, Privacy Policy, and essential app storage to create an account.',
+          'Agree to the Terms of Use and Privacy Policy to create an account.',
         );
       }
       if (isSignUp &&
@@ -235,9 +235,9 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _verifyOtpAndCreateAccount() async {
-    if (isSignUp && !_acceptedTermsAndStorage) {
+    if (isSignUp && !_acceptedTerms) {
       setState(() => _error =
-          'Agree to the Terms of Use, Privacy Policy, and essential app storage to create an account.');
+          'Agree to the Terms of Use and Privacy Policy to create an account.');
       return;
     }
     final inputCode = _otpCtrl.text.trim();
@@ -411,8 +411,6 @@ class _AuthScreenState extends State<AuthScreen> {
   void _showTerms() => showLegalDocument(context, jengaBizTerms);
 
   void _showPrivacy() => showLegalDocument(context, jengaBizPrivacy);
-
-  void _showCookies() => showLegalDocument(context, jengaBizCookiesAndStorage);
 
   @override
   Widget build(BuildContext context) {
@@ -590,7 +588,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               _emailCtrl.clear();
                               _passwordCtrl.clear();
                               _otpCtrl.clear();
-                              _acceptedTermsAndStorage = false;
+                              _acceptedTerms = false;
                             }
                             isSignUp = true;
                             _needsAccountMigration = false;
@@ -628,7 +626,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         child: GestureDetector(
                           onTap: () => setState(() {
                             isSignUp = false;
-                            _acceptedTermsAndStorage = false;
+                            _acceptedTerms = false;
                             _needsAccountMigration = false;
                             _error = null;
                           }),
@@ -742,13 +740,13 @@ class _AuthScreenState extends State<AuthScreen> {
                   CheckboxListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
-                    value: _acceptedTermsAndStorage,
+                    value: _acceptedTerms,
                     activeColor: kBlue,
                     onChanged: _loading
                         ? null
                         : (accepted) => setState(() {
-                              _acceptedTermsAndStorage = accepted ?? false;
-                              if (_acceptedTermsAndStorage) _error = null;
+                              _acceptedTerms = accepted ?? false;
+                              if (_acceptedTerms) _error = null;
                             }),
                     title: const Text(
                       'I agree to the Terms of Use and Privacy Policy.',
@@ -756,7 +754,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                     ),
                     subtitle: const Text(
-                      'This includes essential app storage described in Cookies & App Storage.',
+                      'By continuing, you agree that JengaBiz stores your account and stock data securely.',
                       style: TextStyle(fontSize: 10, color: Color(0xFF777487)),
                     ),
                   ),
@@ -868,17 +866,6 @@ class _AuthScreenState extends State<AuthScreen> {
                         visualDensity: VisualDensity.compact,
                       ),
                       child: const Text('Privacy Policy',
-                          style: TextStyle(fontSize: 11)),
-                    ),
-                    TextButton(
-                      onPressed: _showCookies,
-                      style: TextButton.styleFrom(
-                        minimumSize: Size.zero,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      child: const Text('Cookie & App Storage',
                           style: TextStyle(fontSize: 11)),
                     ),
                   ],
