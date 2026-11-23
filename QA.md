@@ -48,7 +48,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Version `1.0.3+4` is signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Version `1.0.4+5` is signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
 ## Deployment dependency
 
@@ -58,7 +58,7 @@ The landing, API, and email OTP routes are live. Server-side Resend credentials 
 
 Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android package `com.dukaledger.duka_ledger`. The API container reads the sender credential from the Git-ignored `deployment/secrets/jengabiz-fcm-service-account.json` file mounted read-only. Its service account has only the `cloudmessaging.messages.create` permission. Keep this private key on the server; the Android config and `firebase_options.dart` contain client configuration only.
 
-## Current verification (2026-11-22)
+## Verification history (2026-11-22; v1.0.3+4)
 
 - All 14 Flutter tests pass, Flutter analysis reports no issues, and all 9 account API tests pass, including 50 same-county points, 75 different-Kenyan-county points, and rejection of unsupported county names.
 - Release `1.0.3+4` built successfully as `com.dukaledger.duka_ledger` and passed APK v1/v2 signature verification with the existing release certificate. APK size is 27,389,539 bytes; SHA-256 is `6a438076218b62a6b2b894fccba538215d23947a6157a8a64df70df4beaf0ecd`.
@@ -66,3 +66,9 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - The account API restarted healthy after the additive county-detection migration. Existing accounts and stock rows were left intact; the pre-migration SQLite snapshot passed `PRAGMA integrity_check`.
 - The local and public HTTPS landing download endpoints return HTTP 200 with `application/vnd.android.package-archive`, the 1.0.3 attachment name, and the expected APK size.
 - `git diff --check` passed.
+
+## Current release (2026-11-23)
+
+- Release `1.0.4+5` built as `com.dukaledger.duka_ledger`, passed APK v1/v2 signature verification, and matches the v1.0.3 release certificate.
+- APK size is 27,375,312 bytes; SHA-256 is `05d0f0d0b1cd3c0669dc6a63e031c4a324b6947fcdc5c5698548d901f617fdb0`.
+- The home Total Revenue card now uses the bottom navigation blue. Refer & Earn shows a plain total-points value and referral link.

@@ -729,7 +729,7 @@ class SparklinePainter extends CustomPainter {
     canvas.drawPath(
         path,
         Paint()
-          ..color = const Color(0xFFDED0FF)
+          ..color = const Color(0xCCFFFFFF)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.2
           ..strokeJoin = StrokeJoin.round
@@ -857,11 +857,10 @@ class HomeScreen extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(
-                colors: [Color(0xFF5B36E1), Color(0xFFA165EE)]),
+            color: kBlue,
             boxShadow: const [
               BoxShadow(
-                  color: Color(0x307044DA),
+                  color: Color(0x301E6BFF),
                   blurRadius: 26,
                   offset: Offset(0, 12))
             ],
@@ -871,10 +870,9 @@ class HomeScreen extends StatelessWidget {
               width: 51,
               height: 44,
               decoration: BoxDecoration(
-                  color: const Color(0xFFF8B4A3),
-                  borderRadius: BorderRadius.circular(12)),
+                  color: Colors.white, borderRadius: BorderRadius.circular(12)),
               child: const Icon(Icons.account_balance_wallet_rounded,
-                  color: Color(0xFFA75357)),
+                  color: kBlue),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -895,7 +893,8 @@ class HomeScreen extends StatelessWidget {
                                       fontSize: 20,
                                       fontWeight: FontWeight.w800)))),
                       const SizedBox(width: 6),
-                      Pill('$totalUnitsSold sold'),
+                      Pill('$totalUnitsSold sold',
+                          bg: Color(0x33FFFFFF), fg: Colors.white),
                     ]),
                     const SizedBox(height: 4),
                     Text('from ${items.length} products',
@@ -1667,8 +1666,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final points = (summary['totalPoints'] as num?)?.toInt() ?? 0;
-    final progress = (points / 200).clamp(0.0, 1.0).toDouble();
-    final hasLocation = summary['hasLocation'] == true;
     final referralCode = summary['referralCode'] as String? ?? '';
     final referralLink = referralCode.isEmpty
         ? null
@@ -1682,131 +1679,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF6F8FD),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F4)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Points',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  Text(
-                    '$points pts',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: kBlue,
-                    ),
-                  ),
-                ],
+        Row(
+          children: [
+            const Text(
+              'Total points',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$points',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: kBlue,
               ),
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 7,
-                  backgroundColor: const Color(0xFFE3E8F2),
-                  color: kBlue,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                '$points / 200 pts  ·  ${summary['referralCount'] ?? 0} referrals',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF615E73),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-        if (!hasLocation) ...[
+        if (referralLink != null) ...[
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: _referralLocationSaving
-                  ? null
-                  : _detectAndSaveReferralLocation,
-              child: _referralLocationSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Detect my county'),
-            ),
+          const Text(
+            'Referral link',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
-        ] else if (referralLink != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           Builder(
-            builder: (shareContext) => Material(
-              color: const Color(0xFFF6F8FD),
-              borderRadius: BorderRadius.circular(12),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => _shareReferralLink(referralLink, shareContext),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE2E8F4)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.share_rounded, size: 16, color: kBlue),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          referralLink,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF374151),
-                          ),
-                          overflow: TextOverflow.ellipsis,
+            builder: (shareContext) => Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _shareReferralLink(referralLink, shareContext),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        referralLink,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: kBlue,
+                          decoration: TextDecoration.underline,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.copy_rounded,
-                            size: 16, color: kBlue),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        tooltip: 'Copy link',
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await Clipboard.setData(
-                              ClipboardData(text: referralLink));
-                          if (!mounted || !messenger.mounted) return;
-                          messenger.showSnackBar(
-                            const SnackBar(content: Text('Invite link copied')),
-                          );
-                        },
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+                IconButton(
+                  icon: const Icon(Icons.copy_rounded, size: 18, color: kBlue),
+                  tooltip: 'Copy referral link',
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    await Clipboard.setData(ClipboardData(text: referralLink));
+                    if (!mounted || !messenger.mounted) return;
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Referral link copied')),
+                    );
+                  },
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your invite code is $referralCode. The landing page will show it so your friend can enter it after installing JengaBiz.',
-            style: const TextStyle(fontSize: 11, height: 1.4, color: kMuted),
           ),
         ],
         if (_referralError != null) ...[
