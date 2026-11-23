@@ -343,10 +343,10 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
             go: go,
             unread: unread,
             onCheckForUpdates: _openAppUpdates,
+            onSignInAgain: _handleRejectedSession,
             onLogout: () async {
-              await JengaApiService.instance.logoutAccount();
               await JengaDB.instance.logout();
-              go(AppScreen.auth);
+              if (mounted) go(AppScreen.auth);
             });
       case AppScreen.update:
         return UpdateScreen(
@@ -369,6 +369,11 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
           },
         );
     }
+  }
+
+  Future<void> _handleRejectedSession() async {
+    await JengaDB.instance.clearRejectedSession();
+    if (mounted) go(AppScreen.auth);
   }
 
   @override
@@ -1657,11 +1662,13 @@ class ProfileScreen extends StatefulWidget {
       required this.go,
       required this.unread,
       required this.onLogout,
+      this.onSignInAgain,
       this.onCheckForUpdates,
       this.referralSummaryLoader});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback onLogout;
+  final VoidCallback? onSignInAgain;
   final VoidCallback? onCheckForUpdates;
   final Future<JengaApiResponse?> Function()? referralSummaryLoader;
 
@@ -1673,6 +1680,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _referralExpanded = false;
   bool _referralLoading = false;
   bool _referralLocationSaving = false;
+  bool _referralNeedsSignIn = false;
   bool _preferencesLoaded = false;
   Map<String, dynamic>? _referralSummary;
   String? _referralError;
@@ -1730,6 +1738,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (response?.succeeded != true) {
       setState(() {
         _referralLoading = false;
+        _referralNeedsSignIn = response?.statusCode == 401;
+        if (_referralNeedsSignIn) _referralSummary = null;
         _referralError = _referralLoadError(response);
       });
       return;
@@ -1737,6 +1747,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final summary = Map<String, dynamic>.from(response!.data);
     setState(() {
       _referralLoading = false;
+      _referralNeedsSignIn = false;
       _referralSummary = summary;
     });
     if (summary['hasLocation'] != true) {
@@ -1749,7 +1760,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return 'Could not reach JengaBiz. Check your connection and try again.';
     }
     if (response.statusCode == 401) {
-      return 'Your sign-in session is no longer valid. Sign in again to load referral points.';
+      return 'Your sign-in needs refreshing. Sign in again to load referral points.';
     }
     final message = response.data['message'];
     if (message is String && message.trim().isNotEmpty) return message.trim();
@@ -1779,6 +1790,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final response = await JengaApiService.instance.saveReferralLocation(
         county: detected.county,
       );
+      if (response?.statusCode == 401) {
+        if (!mounted) return;
+        setState(() {
+          _referralLocationSaving = false;
+          _referralNeedsSignIn = true;
+          _referralSummary = null;
+          _referralError =
+              'Your sign-in needs refreshing. Sign in again to load referral points.';
+        });
+        return;
+      }
       if (response?.succeeded != true || response?.data['user'] is! Map) {
         throw FormatException(response?.data['message'] as String? ??
             'Could not save your referral location. Please try again.');
@@ -1788,6 +1810,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       setState(() {
         _referralLocationSaving = false;
+        _referralNeedsSignIn = false;
         _referralSummary = {
           ...?_referralSummary,
           'country': 'KE',
@@ -1825,19 +1848,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: const TextStyle(fontSize: 12, color: kMuted),
             ),
             const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _referralLoading ? null : _loadReferralSummary,
-                icon: const Icon(Icons.refresh_rounded, size: 17),
-                label: const Text('Try again'),
-                style: TextButton.styleFrom(
-                  foregroundColor: kBlue,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ),
+            _referralActionButton(),
           ],
         ),
       );
@@ -1946,10 +1957,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _referralError!,
             style: const TextStyle(fontSize: 11, color: Color(0xFFD32F2F)),
           ),
+          _referralActionButton(),
         ],
       ],
     );
   }
+
+  Widget _referralActionButton() => Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _referralLoading || _referralLocationSaving
+              ? null
+              : _referralNeedsSignIn
+                  ? widget.onSignInAgain ?? widget.onLogout
+                  : _loadReferralSummary,
+          icon: Icon(
+            _referralNeedsSignIn ? Icons.login_rounded : Icons.refresh_rounded,
+            size: 17,
+          ),
+          label: Text(_referralNeedsSignIn ? 'Sign in again' : 'Try again'),
+          style: TextButton.styleFrom(
+            foregroundColor: kBlue,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      );
 
   Future<void> _loadPreferences() async {
     try {
@@ -2410,22 +2443,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
 
         const SizedBox(height: 24),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+        Align(
+          alignment: Alignment.center,
           child: SizedBox(
-            height: 50,
-            width: double.infinity,
-            child: OutlinedButton(
+            width: 142,
+            height: 42,
+            child: OutlinedButton.icon(
               onPressed: widget.onLogout,
+              icon: const Icon(Icons.logout_rounded, size: 17),
               style: OutlinedButton.styleFrom(
                 backgroundColor: const Color(0xFFFFF5F6),
                 foregroundColor: const Color(0xFFD23B52),
                 side: const BorderSide(color: Color(0xFFF0C6CC)),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              child: const Text('Log out',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              label: const Text('Log out',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
             ),
           ),
         ),

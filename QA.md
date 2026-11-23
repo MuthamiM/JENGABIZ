@@ -30,6 +30,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Sign out, then test email/password sign-in and fingerprint sign-in separately; confirm fingerprint sign-in is an underlined link below the main button.
 - Sign in, close and reopen the app, and confirm the secure session returns directly to the shop dashboard without another password prompt. Confirm a lost connection still opens the locally cached inventory and synchronizes later.
 - Keep a signed-in session idle beyond 90 days, then reconnect; the session remains valid until explicit sign-out or server revocation.
+- Revoke a session by resetting the account password, reopen Refer & Earn, and confirm the error offers Sign in again; signing in restores referral points and the invite link.
 - Create an account and sign in from a second device; confirm the same profile and stock are returned from the server database.
 - Sign in to an existing phone-only account, verify the email code, and confirm the local profile and inventory migrate without replacing existing server records.
 - Adjust stock while online, sign in on another device, and confirm each user's items stay isolated. Repeat an adjustment offline and confirm it syncs after sign-in.
@@ -57,7 +58,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, `1.1.0+11`, `1.1.1+12`, and `1.1.2+13` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, `1.1.0+11`, `1.1.1+12`, `1.1.2+13`, and `1.1.3+14` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
 Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing page uses the versioned APK URL in the manifest with immutable caching; `/downloads/latest/JengaBiz.apk` remains the stable fallback path.
 
@@ -142,7 +143,13 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - The production `jengabiz-email-otp` service was restarted to activate `/email-auth/reset-password`; its internal health endpoint returned HTTP 200.
 - Release `1.1.1+12` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,671,402 bytes; SHA-256 is `e483ab4dafc45f62f204c1039c16611a33031433ff2d9f1f440e4bb373a4602a`.
 
-## Current in-app update (2026-11-23; v1.1.2+13)
+## Previous in-app update (2026-11-23; v1.1.2+13)
 
 - Grouped the underlined Forgot password and fingerprint sign-in links together beneath the main Sign In button. They stay centered with a small gap and wrap on narrow screens.
 - Release `1.1.2+13` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,671,792 bytes; SHA-256 is `1710bfe00448051a461c2d931673a1c8f76a88bfe06bf5c6f49fd28682c5c863`.
+
+## Current in-app update (2026-11-23; v1.1.3+14)
+
+- A rejected referral session now offers a Sign in again action so users can refresh authentication before loading points. Sessions remain persistent until server revocation or sign-out.
+- Reduced the Profile Log out button to a compact centered control.
+- Release `1.1.3+14` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,673,294 bytes; SHA-256 is `4dcd00436038542c317d3c12f3634300f95210574edf3071e50a4e5e3ddb8cc0`.

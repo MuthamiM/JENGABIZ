@@ -744,6 +744,14 @@ class JengaDB {
     await prefs.remove('current_user_id');
   }
 
+  Future<void> clearRejectedSession() async {
+    await JengaApiService.instance.clearSession();
+    currentUser = null;
+    shouldResumeSavedSession = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('current_user_id');
+  }
+
   Future<bool> adjustStock(String itemId, int delta) async {
     final idx = items.indexWhere((it) => it.id == itemId);
     if (idx != -1) {
