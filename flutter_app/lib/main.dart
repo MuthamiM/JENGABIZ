@@ -11,6 +11,8 @@ import 'legal_documents.dart';
 import 'screens/auth_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/stock_screen.dart';
+import 'screens/update_screen.dart';
+import 'services/app_update_service.dart';
 import 'services/api_service.dart';
 import 'services/db_service.dart';
 import 'services/firebase_push_service.dart';
@@ -62,7 +64,16 @@ class JengaBizApp extends StatelessWidget {
 
 typedef DukaLedgerApp = JengaBizApp;
 
-enum AppScreen { welcome, auth, home, analytics, profile, notifications, stock }
+enum AppScreen {
+  welcome,
+  auth,
+  home,
+  analytics,
+  profile,
+  notifications,
+  stock,
+  update,
+}
 
 class Notice {
   Notice(this.id, this.title, this.body, this.time, this.tone, this.icon,
@@ -84,6 +95,8 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   late AppScreen screen;
   late final Future<void> _databaseReady;
   Timer? _stockRetryTimer;
+  JengaBizRelease? _availableUpdate;
+  AppScreen _screenBeforeUpdate = AppScreen.welcome;
 
   @override
   void initState() {
@@ -139,9 +152,44 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
         await FirebasePushService.instance.initialize();
       }
     } catch (_) {}
-    if (mounted && JengaDB.instance.shouldResumeSavedSession) {
+    final initialScreen = JengaDB.instance.shouldResumeSavedSession
+        ? AppScreen.home
+        : AppScreen.welcome;
+    final update = await AppUpdateService.instance.availableRelease();
+    if (!mounted) return;
+    _screenBeforeUpdate = initialScreen;
+    var dismissedUpdateCode = 0;
+    try {
+      dismissedUpdateCode = (await SharedPreferences.getInstance())
+              .getInt('jengabiz_update_dismissed_code') ??
+          0;
+    } catch (_) {}
+    if (update != null && update.versionCode > dismissedUpdateCode) {
+      setState(() {
+        _availableUpdate = update;
+        screen = AppScreen.update;
+      });
+    } else if (initialScreen == AppScreen.home) {
       setState(() => screen = AppScreen.home);
     }
+  }
+
+  void _openAppUpdates() {
+    _screenBeforeUpdate = screen;
+    _availableUpdate = null;
+    go(AppScreen.update);
+  }
+
+  void _dismissAppUpdate(JengaBizRelease? release) {
+    if (release != null) {
+      unawaited(SharedPreferences.getInstance().then(
+        (preferences) => preferences.setInt(
+          'jengabiz_update_dismissed_code',
+          release.versionCode,
+        ),
+      ));
+    }
+    go(_screenBeforeUpdate);
   }
 
   Future<void> _openAuth() async {
@@ -239,11 +287,17 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
         return ProfileScreen(
             go: go,
             unread: unread,
+            onCheckForUpdates: _openAppUpdates,
             onLogout: () async {
               await JengaApiService.instance.logoutAccount();
               await JengaDB.instance.logout();
               go(AppScreen.auth);
             });
+      case AppScreen.update:
+        return UpdateScreen(
+          initialRelease: _availableUpdate,
+          onBack: _dismissAppUpdate,
+        );
       case AppScreen.notifications:
         return NotificationsScreen(
           onBack: () => go(AppScreen.home),
@@ -1520,10 +1574,12 @@ class ProfileScreen extends StatefulWidget {
       required this.go,
       required this.unread,
       required this.onLogout,
+      this.onCheckForUpdates,
       this.referralSummaryLoader});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback onLogout;
+  final VoidCallback? onCheckForUpdates;
   final Future<JengaApiResponse?> Function()? referralSummaryLoader;
 
   @override
@@ -2145,14 +2201,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'What account and shop data is used',
                 () => showLegalDocument(context, jengaBizPrivacy),
               ),
-              const Divider(height: 1, indent: 68, color: Color(0xFFF1F3F9)),
-              _legalRow(
-                Icons.storage_outlined,
-                'Cookies & App Storage',
-                'Website cookies and phone storage',
-                () => showLegalDocument(context, jengaBizCookiesAndStorage),
-              ),
             ],
+          ),
+        ),
+
+        const SizedBox(height: 18),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'App updates',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: kMuted,
+            ),
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          color: Colors.white,
+          child: _legalRow(
+            Icons.system_update_alt_rounded,
+            'Check for updates',
+            'Get the latest JengaBiz version',
+            widget.onCheckForUpdates ?? () {},
           ),
         ),
 

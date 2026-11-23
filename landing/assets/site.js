@@ -70,4 +70,41 @@
     referralCode.textContent = code.toUpperCase();
     referralNote.hidden = false;
   }
+
+  const latestVersionLabels = document.querySelectorAll('[data-latest-version]');
+  const latestApkLinks = document.querySelectorAll('[data-latest-apk]');
+  const latestChecksumLinks = document.querySelectorAll('[data-latest-checksum]');
+  if (
+    latestVersionLabels.length ||
+    latestApkLinks.length ||
+    latestChecksumLinks.length
+  ) {
+    fetch('/downloads/latest.json', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Latest release details unavailable.');
+        return response.json();
+      })
+      .then((release) => {
+        if (typeof release.version_name === 'string') {
+          latestVersionLabels.forEach((label) => {
+            label.textContent = release.version_name;
+          });
+        }
+        const versionCode = Number(release.version_code);
+        if (Number.isSafeInteger(versionCode) && versionCode > 0) {
+          const cacheKey = encodeURIComponent(String(versionCode));
+          latestApkLinks.forEach((link) => {
+            link.href = `/downloads/latest/JengaBiz.apk?v=${cacheKey}`;
+          });
+          latestChecksumLinks.forEach((link) => {
+            link.href = `/downloads/latest/JengaBiz.sha256?v=${cacheKey}`;
+          });
+        }
+      })
+      .catch(() => {
+        latestVersionLabels.forEach((label) => {
+          label.textContent = 'latest';
+        });
+      });
+  }
 })();

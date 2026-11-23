@@ -31,7 +31,8 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Sign in to an existing phone-only account, verify the email code, and confirm the local profile and inventory migrate without replacing existing server records.
 - Adjust stock while online, sign in on another device, and confirm each user's items stay isolated. Repeat an adjustment offline and confirm it syncs after sign-in.
 - During sign-up, confirm account creation is blocked until the Terms/Privacy and essential app-storage checkbox is selected, then verify the acceptance timestamp is recorded. Confirm no cookie banner appears in the app.
-- Open Terms, Privacy, and Cookies & App Storage from sign-up and Profile > Privacy & Legal.
+- Open Terms, Privacy, and Cookies & App Storage from sign-up; Profile > Privacy & Legal contains Terms and Privacy only.
+- Confirm Profile > App updates checks the latest-version manifest, shows the JengaBiz-colored update page, and presents the Android installer only after the APK checksum passes. Android must ask the user to confirm installation.
 - Expand Refer & Earn and allow device location; confirm there are no editable country/county fields and the invite URL contains an opaque code rather than account email. Verify the app accepts Kenya and blocks other countries. Open the link, enter the displayed code during signup, and verify by email. Confirm same-county signups add 50 JengaBiz points, different Kenyan counties add 75, each referred account counts once, and no international referral rate is offered.
 - Open Home, Analytics, Stock, Notifications, and Profile; verify navigation and scrolling.
 - Open Stock and confirm there is no inventory-metrics card, title, or dispatch banner; the PDF/add/sort icons remain, search stays visible, and status/category filters scroll away with the inventory.
@@ -51,7 +52,9 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Version `1.0.5+6` is signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Version `1.0.6+7` is signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+
+Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing-page download uses `/downloads/latest/JengaBiz.apk`; future app versions can update that APK and the manifest while keeping the same link.
 
 ## Deployment dependency
 
@@ -76,10 +79,17 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - APK size is 27,375,312 bytes; SHA-256 is `05d0f0d0b1cd3c0669dc6a63e031c4a324b6947fcdc5c5698548d901f617fdb0`.
 - The home Total Revenue card now uses the bottom navigation blue. Refer & Earn shows a plain total-points value and referral link.
 
-## Current release (2026-11-23; v1.0.5+6)
+## Previous release (2026-11-23; v1.0.5+6)
 
 - Added a required sign-up agreement for Terms, Privacy, and essential app storage; saved its version and timestamp locally. Added the full policies to sign-up and Profile; the native app has no cookie banner.
 - Rebuilt the JengaBiz landing page using the app palette, with feature, setup, privacy, FAQ, About, and contact sections; added Terms, Privacy, and Cookies & App Storage pages.
 - Expanded the product-record information and changed marketing sections to a full-width, flat layout without content cards. Reduced the logo size, made legal pages responsive on phone screens, prevented horizontal overflow, and hid the browser scrollbar while keeping touch/keyboard scrolling available.
 - Added persistent website cookie preferences for accepting all, rejecting non-essential categories, or saving custom Analytics and Marketing choices. The current site has no analytics or advertising tools enabled.
 - Release `1.0.5+6` built as `com.dukaledger.duka_ledger` and passed APK v1/v2 signature verification with the existing release certificate. APK size is 27,447,257 bytes; SHA-256 is `17f740b24180468128a587bf40392a804cd92c05491667f11f87deb94526fd47`.
+
+## Current release (2026-11-23; v1.0.6+7)
+
+- Profile > Privacy & Legal now contains Terms of Use and Privacy Policy only. Sign-up still explains and records acceptance of essential app storage.
+- Added a JengaBiz-blue update screen, startup version check, Profile > App updates entry, checksum-verified APK download, and Android installer handoff.
+- Added a stable latest APK path and version manifest so updater-enabled versions can install the latest release directly.
+- Release `1.0.6+7` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,525,470 bytes; SHA-256 is `9bc42be00a7e1530418e30b7b2e04fe4ff7a17cc13a16f4b103a60bc1299cb4f`.
