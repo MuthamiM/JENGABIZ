@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'legal_documents.dart';
 import 'screens/auth_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/stock_screen.dart';
@@ -1787,6 +1788,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Widget _legalRow(
+    IconData icon,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: kTintPurple,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: kBlue, size: 20),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(fontSize: 11, color: kMuted),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded, color: kMuted),
+      onTap: onTap,
+    );
+  }
+
   Widget _row(
       IconData icon, Color bg, Color fg, String label, VoidCallback onTap,
       {int count = 0}) {
@@ -2079,6 +2110,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ],
                 ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 18),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'Privacy & Legal',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: kMuted,
+            ),
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          color: Colors.white,
+          child: Column(
+            children: [
+              _legalRow(
+                Icons.description_outlined,
+                'Terms of Use',
+                'Rules for using JengaBiz',
+                () => showLegalDocument(context, jengaBizTerms),
+              ),
+              const Divider(height: 1, indent: 68, color: Color(0xFFF1F3F9)),
+              _legalRow(
+                Icons.shield_outlined,
+                'Privacy Policy',
+                'What account and shop data is used',
+                () => showLegalDocument(context, jengaBizPrivacy),
+              ),
+              const Divider(height: 1, indent: 68, color: Color(0xFFF1F3F9)),
+              _legalRow(
+                Icons.storage_outlined,
+                'Cookies & App Storage',
+                'Website cookies and phone storage',
+                () => showLegalDocument(context, jengaBizCookiesAndStorage),
               ),
             ],
           ),

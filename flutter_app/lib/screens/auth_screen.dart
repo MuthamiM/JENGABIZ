@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../legal_documents.dart';
 import '../services/db_service.dart';
 import '../services/api_service.dart';
 import '../services/firebase_push_service.dart';
@@ -20,6 +22,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool isSignUp = true;
   bool isVerifyingCode = false;
   bool _needsAccountMigration = false;
+  bool _acceptedTermsAndStorage = false;
 
   final _nameCtrl = TextEditingController();
   final _shopCtrl = TextEditingController();
@@ -71,6 +74,11 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
+      if (isSignUp && !_acceptedTermsAndStorage) {
+        throw const FormatException(
+          'Agree to the Terms of Use, Privacy Policy, and essential app storage to create an account.',
+        );
+      }
       if (isSignUp &&
           (_nameCtrl.text.trim().isEmpty || _shopCtrl.text.trim().isEmpty)) {
         throw const FormatException(
@@ -227,6 +235,11 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _verifyOtpAndCreateAccount() async {
+    if (isSignUp && !_acceptedTermsAndStorage) {
+      setState(() => _error =
+          'Agree to the Terms of Use, Privacy Policy, and essential app storage to create an account.');
+      return;
+    }
     final inputCode = _otpCtrl.text.trim();
     if (inputCode.isEmpty) {
       setState(() => _error = 'Please enter the 6-digit verification code');
@@ -289,6 +302,7 @@ class _AuthScreenState extends State<AuthScreen> {
               'Could not save the account. Check your connection and request a new email code.',
         );
       }
+      if (isSignUp) await _recordTermsAcceptance();
       final stockSynced = await _activateRemoteAccount(
         response!.data,
         _passwordCtrl.text,
@@ -323,6 +337,19 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _recordTermsAcceptance() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setInt('jengabiz_terms_acceptance_version', 1);
+      await preferences.setString(
+        'jengabiz_terms_acceptance_utc',
+        DateTime.now().toUtc().toIso8601String(),
+      );
+    } catch (_) {
+      // Account creation must not fail if the local acknowledgement cannot be saved.
     }
   }
 
@@ -381,70 +408,11 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  void _showPolicy(String title, List<String> paragraphs) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 520),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ListView(
-                    children: paragraphs
-                        .map((paragraph) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(paragraph,
-                                  style: const TextStyle(height: 1.5)),
-                            ))
-                        .toList(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  void _showTerms() => showLegalDocument(context, jengaBizTerms);
 
-  void _showTerms() => _showPolicy('Terms of Use', const [
-        'JengaBiz provides tools for recording and reviewing shop inventory, sales, and business activity. These terms apply when you create an account or use the app.',
-        'Give accurate account details and keep your password and device secure. You are responsible for activity performed through your account and for limiting access to your shop records.',
-        'Use JengaBiz only for lawful business purposes and only enter information you are authorized to manage. Do not attempt to disrupt the service, access another person’s account, or misuse verification codes.',
-        'You own the business information you enter. You are responsible for checking your entries and maintaining any backup you need, especially before changing devices or clearing app data.',
-        'Sales totals, stock summaries, and other calculations are recordkeeping aids. Review them against your source documents before making financial, tax, legal, or purchasing decisions; JengaBiz does not provide professional advice.',
-        'JengaBiz referral points are available in Kenya only. A new account that enters a valid referral code and verifies its email can award 50 points when both shops are in the same county, or 75 points when they are in different counties. Each new account can count once. Redemption is not available yet.',
-        'Some features need an internet connection and may be unavailable during maintenance, provider outages, or network interruptions. You are responsible for compatible devices and data charges.',
-        'JengaBiz and its design, name, and software remain protected by applicable intellectual property rights. You may use the app for your own business while following these terms.',
-        'We may restrict access when needed to protect accounts, users, or the service, including when there is suspected fraud, abuse, or a security risk. You may stop using the app at any time.',
-        'The app is provided as a business recordkeeping tool. To the extent permitted by law, you are responsible for decisions made using its records and summaries.',
-        'We may revise these terms as the service changes. The current version is shown here; continued use after an update means you accept the revised terms. For support, contact MF Technologies through mftechnologies.org.',
-      ]);
+  void _showPrivacy() => showLegalDocument(context, jengaBizPrivacy);
 
-  void _showPrivacy() => _showPolicy('Privacy Policy', const [
-        'JengaBiz uses your name, shop name, email address, optional phone number, and a salted password hash to create and protect your account. Passwords are never stored in plain text; the server uses scrypt and the app keeps a separate PBKDF2 hash for offline sign-in.',
-        'When you request account verification, your email address and one-time code are sent through our email delivery provider so it can deliver the message. Codes expire after 10 minutes, can be used once, and are limited to reduce abuse.',
-        'Your shop profile and inventory are stored in the JengaBiz account database and cached on your device so the app can work during brief network interruptions. Inventory changes sync to the account database when connected. The app may also cache data on your device for faster screens and the stock widget.',
-        'Location access is optional. If you allow it, the app uses your location to estimate the nearest supply hub. You can deny or revoke location access in your device settings.',
-        'Fingerprint or face authentication is handled by your device operating system. JengaBiz receives only the success or failure result; the app does not receive or store your fingerprint or face data.',
-        'We use account and business information to provide app features, verify email ownership, protect accounts, and respond to support requests. We do not sell your personal information.',
-        'If you use Refer & Earn, JengaBiz uses your phone location and the device geocoder to detect whether you are in Kenya and identify your county. GPS coordinates are not sent to JengaBiz; the JengaBiz service receives the detected country code and county needed to apply the referral rules.',
-        'Information may be processed by infrastructure and email providers that help operate the service. They receive only the information needed to provide their service and protect it.',
-        'Changes made offline remain on that device until they sync. If the device is lost, the app is removed, or its storage is cleared before sync, those pending changes may be lost. Contact MF Technologies for account or data support.',
-        'We use reasonable safeguards, including encrypted network connections for public services and salted password hashing. No device or online service can be guaranteed completely secure, so keep your device locked and do not share verification codes.',
-        'We retain verification codes only briefly and remove them after successful use or expiry. Other information is kept while needed to provide the app or meet service and legal requirements.',
-        'For privacy questions or account support, contact MF Technologies through mftechnologies.org.',
-      ]);
+  void _showCookies() => showLegalDocument(context, jengaBizCookiesAndStorage);
 
   @override
   Widget build(BuildContext context) {
@@ -622,6 +590,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               _emailCtrl.clear();
                               _passwordCtrl.clear();
                               _otpCtrl.clear();
+                              _acceptedTermsAndStorage = false;
                             }
                             isSignUp = true;
                             _needsAccountMigration = false;
@@ -659,6 +628,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         child: GestureDetector(
                           onTap: () => setState(() {
                             isSignUp = false;
+                            _acceptedTermsAndStorage = false;
                             _needsAccountMigration = false;
                             _error = null;
                           }),
@@ -767,6 +737,31 @@ class _AuthScreenState extends State<AuthScreen> {
                   keyboard: TextInputType.visiblePassword,
                 ),
 
+                if (isSignUp) ...[
+                  const SizedBox(height: 8),
+                  CheckboxListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: _acceptedTermsAndStorage,
+                    activeColor: kBlue,
+                    onChanged: _loading
+                        ? null
+                        : (accepted) => setState(() {
+                              _acceptedTermsAndStorage = accepted ?? false;
+                              if (_acceptedTermsAndStorage) _error = null;
+                            }),
+                    title: const Text(
+                      'I agree to the Terms of Use and Privacy Policy.',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text(
+                      'This includes essential app storage described in Cookies & App Storage.',
+                      style: TextStyle(fontSize: 10, color: Color(0xFF777487)),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 28),
 
                 // Submit Button
@@ -847,7 +842,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     const Text(
-                      'By continuing, you agree to our',
+                      'Read:',
                       style: TextStyle(fontSize: 11, color: Color(0xFF777487)),
                     ),
                     TextButton(
@@ -873,6 +868,17 @@ class _AuthScreenState extends State<AuthScreen> {
                         visualDensity: VisualDensity.compact,
                       ),
                       child: const Text('Privacy Policy',
+                          style: TextStyle(fontSize: 11)),
+                    ),
+                    TextButton(
+                      onPressed: _showCookies,
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('Cookie & App Storage',
                           style: TextStyle(fontSize: 11)),
                     ),
                   ],
