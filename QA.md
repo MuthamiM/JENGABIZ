@@ -52,7 +52,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Version `1.0.6+7` is signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Release versions `1.0.6+7` and `1.0.7+8` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
 Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing-page download uses `/downloads/latest/JengaBiz.apk`; future app versions can update that APK and the manifest while keeping the same link.
 
@@ -87,9 +87,15 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - Added persistent website cookie preferences for accepting all, rejecting non-essential categories, or saving custom Analytics and Marketing choices. The current site has no analytics or advertising tools enabled.
 - Release `1.0.5+6` built as `com.dukaledger.duka_ledger` and passed APK v1/v2 signature verification with the existing release certificate. APK size is 27,447,257 bytes; SHA-256 is `17f740b24180468128a587bf40392a804cd92c05491667f11f87deb94526fd47`.
 
-## Current release (2026-11-23; v1.0.6+7)
+## Previous release (2026-11-23; v1.0.6+7)
 
 - Profile > Privacy & Legal now contains Terms of Use and Privacy Policy only. Sign-up still explains and records acceptance of essential app storage.
 - Added a JengaBiz-blue update screen, startup version check, Profile > App updates entry, checksum-verified APK download, and Android installer handoff.
 - Added a stable latest APK path and version manifest so updater-enabled versions can install the latest release directly.
 - Release `1.0.6+7` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,525,470 bytes; SHA-256 is `9bc42be00a7e1530418e30b7b2e04fe4ff7a17cc13a16f4b103a60bc1299cb4f`.
+
+## Current in-app update (2026-11-23; v1.0.7+8)
+
+- Replaced the welcome screen's generic bar-chart and settings icons with outlined inventory and alert icons, both using one pale-blue tile style.
+- Updated `/downloads/latest.json` and the stable latest APK path; v1.0.6 and newer can install this update from the in-app updater.
+- APK is signed as `com.dukaledger.duka_ledger` with the existing release certificate. Size is 27,525,440 bytes; SHA-256 is `ca647ba577069066419237463faabf79507e04e276cf4daf5e8ba86a2c15d87d`.

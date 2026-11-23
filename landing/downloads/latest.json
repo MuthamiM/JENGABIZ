@@ -1,11 +1,11 @@
 {
-  "version_name": "1.0.6",
-  "version_code": 7,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/latest/JengaBiz.apk?v=7",
-  "sha256": "9bc42be00a7e1530418e30b7b2e04fe4ff7a17cc13a16f4b103a60bc1299cb4f",
+  "version_name": "1.0.7",
+  "version_code": 8,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/latest/JengaBiz.apk?v=8",
+  "sha256": "ca647ba577069066419237463faabf79507e04e276cf4daf5e8ba86a2c15d87d",
   "release_notes": [
-    "Profile Privacy & Legal now shows Terms and Privacy only.",
-    "Check for updates from Profile or when JengaBiz finds a newer version.",
-    "Updates are checksum-verified before Android opens the installer."
+    "Welcome-screen icons now clearly represent inventory and stock alerts.",
+    "Both icons use the JengaBiz blue palette and a consistent visual style.",
+    "Updates remain available from the in-app updater."
   ]
 }

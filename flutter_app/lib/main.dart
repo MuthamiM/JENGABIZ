@@ -590,18 +590,19 @@ class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key, required this.onStart});
   final VoidCallback onStart;
 
-  Widget _feature(
-      IconData icon, List<Color> colors, String title, String body) {
+  Widget _feature(IconData icon, String title, String body) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(children: [
         Container(
-          width: 56,
-          height: 56,
+          width: 52,
+          height: 52,
           decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(colors: colors)),
-          child: Icon(icon, color: Colors.white, size: 28),
+            color: kTintPurple,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFD8E5FF)),
+          ),
+          child: Icon(icon, color: kBlue, size: 25),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -661,13 +662,11 @@ class WelcomeScreen extends StatelessWidget {
                             letterSpacing: -1)),
                     const SizedBox(height: 24),
                     _feature(
-                        Icons.bar_chart_rounded,
-                        const [Color(0xFF1E6BFF), Color(0xFF3B82F6)],
+                        Icons.inventory_2_outlined,
                         'Know what is in stock',
                         'Keep products, quantities and prices organized in one simple catalog.'),
                     _feature(
-                        Icons.settings_outlined,
-                        const [Color(0xFF0284C7), Color(0xFF38BDF8)],
+                        Icons.notifications_active_outlined,
                         'See what needs attention',
                         'Spot low stock and best sellers so you can make your next move with confidence.'),
                   ]),
