@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -65,6 +66,7 @@ class JengaBizApp extends StatelessWidget {
 typedef DukaLedgerApp = JengaBizApp;
 
 enum AppScreen {
+  splash,
   welcome,
   auth,
   home,
@@ -93,17 +95,17 @@ class Root extends StatefulWidget {
 
 class _RootState extends State<Root> with WidgetsBindingObserver {
   late AppScreen screen;
-  late final Future<void> _databaseReady;
   Timer? _stockRetryTimer;
   JengaBizRelease? _availableUpdate;
-  AppScreen _screenBeforeUpdate = AppScreen.welcome;
+  AppScreen _screenBeforeUpdate = AppScreen.splash;
+  bool _hasSeenWelcome = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    screen = AppScreen.welcome;
-    _databaseReady = _initializeApp();
+    screen = AppScreen.splash;
+    unawaited(_initializeApp());
     _initAppLocation();
     _startPendingStockRetries();
   }
@@ -160,34 +162,67 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     try {
       await JengaDB.instance.init();
       if (JengaApiService.instance.authToken != null) {
-        await FirebasePushService.instance.initialize();
+        unawaited(_initializePushNotifications());
       }
     } catch (_) {}
+
+    final hasExistingAccount = JengaDB.instance.shouldResumeSavedSession ||
+        JengaDB.instance.currentUser != null ||
+        JengaDB.instance.users.isNotEmpty;
+    var welcomeSeen = hasExistingAccount;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final savedWelcomeSeen = preferences.getBool(_welcomeSeenKey);
+      if (savedWelcomeSeen != null) {
+        welcomeSeen = savedWelcomeSeen;
+      } else if (hasExistingAccount) {
+        await preferences.setBool(_welcomeSeenKey, true);
+      }
+    } catch (_) {}
+
+    _hasSeenWelcome = welcomeSeen;
     final initialScreen = JengaDB.instance.shouldResumeSavedSession
         ? AppScreen.home
-        : AppScreen.welcome;
-    final update = await AppUpdateService.instance.availableRelease();
+        : welcomeSeen
+            ? AppScreen.auth
+            : AppScreen.welcome;
     if (!mounted) return;
     _screenBeforeUpdate = initialScreen;
+    setState(() => screen = initialScreen);
+    unawaited(_loadAvailableUpdate());
+  }
+
+  static const _welcomeSeenKey = 'jengabiz_welcome_seen_v1';
+
+  Future<void> _initializePushNotifications() async {
+    try {
+      await FirebasePushService.instance.initialize();
+    } catch (_) {}
+  }
+
+  Future<void> _markWelcomeSeen() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_welcomeSeenKey, true);
+    } catch (_) {}
+  }
+
+  Future<void> _loadAvailableUpdate() async {
+    final update = await AppUpdateService.instance.availableRelease();
+    if (!mounted || update == null) return;
     var dismissedUpdateCode = 0;
     try {
       dismissedUpdateCode = (await SharedPreferences.getInstance())
               .getInt('jengabiz_update_dismissed_code') ??
           0;
     } catch (_) {}
-    if (update != null && update.versionCode > dismissedUpdateCode) {
-      setState(() {
-        _availableUpdate = update;
-        screen = AppScreen.update;
-      });
-    } else if (initialScreen == AppScreen.home) {
-      setState(() => screen = AppScreen.home);
+    if (update.versionCode > dismissedUpdateCode) {
+      setState(() => _availableUpdate = update);
     }
   }
 
   void _openAppUpdates() {
     _screenBeforeUpdate = screen;
-    _availableUpdate = null;
     go(AppScreen.update);
   }
 
@@ -203,12 +238,19 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     go(_screenBeforeUpdate);
   }
 
-  Future<void> _openAuth() async {
-    await _databaseReady;
-    if (mounted) {
-      go(JengaDB.instance.shouldResumeSavedSession
-          ? AppScreen.home
-          : AppScreen.auth);
+  void _openAuth() {
+    _hasSeenWelcome = true;
+    unawaited(_markWelcomeSeen());
+    go(JengaDB.instance.shouldResumeSavedSession
+        ? AppScreen.home
+        : AppScreen.auth);
+  }
+
+  void _backFromAuth() {
+    if (_hasSeenWelcome) {
+      unawaited(SystemNavigator.pop());
+    } else {
+      go(AppScreen.welcome);
     }
   }
 
@@ -279,12 +321,14 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
 
   Widget _body() {
     switch (screen) {
+      case AppScreen.splash:
+        return const AppSplashScreen();
       case AppScreen.welcome:
         return WelcomeScreen(onStart: _openAuth);
       case AppScreen.auth:
         return AuthScreen(
           onSuccess: () => go(AppScreen.home),
-          onBack: () => go(AppScreen.welcome),
+          onBack: _backFromAuth,
         );
       case AppScreen.stock:
         return StockScreen(
@@ -593,6 +637,35 @@ BoxDecoration cardDeco(Color c) {
           ]
         : null,
   );
+}
+
+class AppSplashScreen extends StatelessWidget {
+  const AppSplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image(
+            image: AssetImage('assets/jengabiz_mark.png'),
+            height: 54,
+            fit: BoxFit.contain,
+          ),
+          SizedBox(height: 22),
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: kBlue,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------- Welcome ----------
@@ -1809,37 +1882,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 4),
           Builder(
-            builder: (shareContext) => Row(
+            builder: (shareContext) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: InkWell(
-                    onTap: () => _shareReferralLink(referralLink, shareContext),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        referralLink,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: kBlue,
-                          decoration: TextDecoration.underline,
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () =>
+                            _shareReferralLink(referralLink, shareContext),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Text(
+                            referralLink,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: kBlue,
+                              decoration: TextDecoration.underline,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded,
+                          size: 18, color: kBlue),
+                      tooltip: 'Copy referral link',
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        await Clipboard.setData(
+                            ClipboardData(text: referralLink));
+                        if (!mounted || !messenger.mounted) return;
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Referral link copied')),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.copy_rounded, size: 18, color: kBlue),
-                  tooltip: 'Copy referral link',
-                  onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    await Clipboard.setData(ClipboardData(text: referralLink));
-                    if (!mounted || !messenger.mounted) return;
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Referral link copied')),
-                    );
-                  },
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        _inviteReferralContact(referralLink, shareContext),
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 17),
+                    label: const Text('Invite a contact'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: kBlue,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1954,7 +2049,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _shareReferralLink(
-      String referralLink, BuildContext shareContext) async {
+      String referralLink, BuildContext shareContext,
+      {String? inviteeName}) async {
     final renderObject = shareContext.findRenderObject();
     final messenger = ScaffoldMessenger.of(context);
     final sharePositionOrigin =
@@ -1966,8 +2062,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await SharePlus.instance.share(
         ShareParams(
           title: 'Invite to JengaBiz',
-          text:
-              'Grow your shop with JengaBiz. Join using my invite link: $referralLink',
+          text: inviteeName == null || inviteeName.trim().isEmpty
+              ? 'Grow your shop with JengaBiz. Join using my invite link: $referralLink'
+              : 'Hi ${inviteeName.trim()}, grow your shop with JengaBiz. Join using my invite link: $referralLink',
           sharePositionOrigin: sharePositionOrigin,
         ),
       );
@@ -1978,6 +2075,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content:
               Text('Unable to open sharing options. Copy the link instead.'),
         ),
+      );
+    }
+  }
+
+  Future<void> _inviteReferralContact(
+    String referralLink,
+    BuildContext shareContext,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final permissionGranted =
+          await FlutterContacts.requestPermission(readonly: true);
+      if (!mounted) return;
+      if (!permissionGranted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Allow Contacts access to choose someone to invite. You can still copy or share the link manually.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final contact = await FlutterContacts.openExternalPick();
+      if (!mounted || contact == null) return;
+      await _shareReferralLink(
+        referralLink,
+        shareContext,
+        inviteeName: contact.displayName,
+      );
+    } catch (_) {
+      if (!mounted || !messenger.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+            content: Text('Could not open your contacts. Try again.')),
       );
     }
   }

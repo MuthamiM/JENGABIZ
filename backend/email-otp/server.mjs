@@ -160,7 +160,11 @@ export function createEmailOtpHandler({
         return json(response, 200, { status: 'ok' });
       }
 
-      const otpPaths = ['/email-auth/request-otp', '/email-auth/verify-otp'];
+      const otpPaths = [
+        '/email-auth/request-otp',
+        '/email-auth/verify-otp',
+        '/email-auth/reset-password',
+      ];
       const accountPaths = [
         '/email-auth/register',
         '/email-auth/migrate',
@@ -498,6 +502,42 @@ export function createEmailOtpHandler({
         return json(response, 200, {
           success: true,
           message: 'A verification code was sent to your email address.',
+        });
+      }
+
+      if (path === '/email-auth/reset-password') {
+        const verificationToken = typeof payload?.verificationToken === 'string'
+          ? payload.verificationToken
+          : '';
+        const tokenHash = verificationToken ? digestGrant(verificationToken) : '';
+        const grant = verificationGrants.get(tokenHash);
+        const newPassword = typeof payload?.newPassword === 'string'
+          ? payload.newPassword
+          : '';
+        if (newPassword.length < 8 || Buffer.byteLength(newPassword) > 1024) {
+          return json(response, 400, {
+            success: false,
+            message: 'Use a new password with at least 8 characters.',
+          });
+        }
+        if (!grant || grant.email !== email || grant.expiresAt <= now()) {
+          verificationGrants.delete(tokenHash);
+          return json(response, 401, {
+            success: false,
+            message: 'Verify your email again before resetting your password.',
+          });
+        }
+        const reset = accounts.resetPassword(email, newPassword);
+        verificationGrants.delete(tokenHash);
+        if (!reset) {
+          return json(response, 404, {
+            success: false,
+            message: 'No account was found for this email address.',
+          });
+        }
+        return json(response, 200, {
+          success: true,
+          message: 'Password changed. Sign in with your new password.',
         });
       }
 

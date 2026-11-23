@@ -43,7 +43,7 @@ const jengaBizTerms = LegalDocument(
     ),
     LegalSection(
       'Optional device features',
-      'Fingerprint or face authentication is handled by your phone’s operating system. Location, photos, and push notifications depend on device permissions and app settings. You can change permissions or preferences in Android settings; related features may then be unavailable.',
+      'Fingerprint or face authentication is handled by your phone’s operating system. Location, contacts, photos, and push notifications depend on device permissions and app settings. Contacts access is requested only when you choose Invite a contact in Refer & Earn. You can still copy or share your referral link if you decline. You can change permissions or preferences in Android settings; related features may then be unavailable.',
     ),
     LegalSection(
       'Acceptable use and service changes',
@@ -77,7 +77,7 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'Location and device features',
-      'Location permission is optional. If allowed, the app can estimate a nearby supply hub and detect your country and county for Kenya-only referral rules. The referral service receives the detected country and county, not your GPS coordinates. Fingerprint and face checks are performed by Android; JengaBiz receives the authentication result and does not receive or store biometric templates. Photo access is used when you choose a product image.',
+      'Location permission is optional. If allowed, the app can estimate a nearby supply hub and detect your country and county for Kenya-only referral rules. The referral service receives the detected country and county, not your GPS coordinates. Fingerprint and face checks are performed by Android; JengaBiz receives the authentication result and does not receive or store biometric templates. When you choose a product photo, Android shares only that selected photo with JengaBiz through its system media picker; the app does not browse your photo or video library. JengaBiz does not currently use videos for stock records. Contacts permission is requested only when you choose Invite a contact. The selected contact’s display name can personalize the invite; your address book is not uploaded to JengaBiz or saved by the app.',
     ),
     LegalSection(
       'On-device storage and syncing',

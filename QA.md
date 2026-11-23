@@ -22,6 +22,8 @@ The phone keeps an offline profile and inventory cache. The production account s
 ## Release smoke checks
 
 - Launch with a clean install and confirm the welcome page appears immediately after the Android splash screen.
+- Reopen after first launch: go from splash directly to sign-in when signed out, or directly to the shop home when the secure session is active. Confirm Explore opens sign-in without waiting for the update check.
+- From sign-in, use Forgot password, receive and verify the email OTP, enter and repeat a new password, then sign in with it. Confirm reset revokes existing sessions.
 - Create an account with a valid email and password; confirm a 6-digit verification code arrives by email. Phone is optional.
 - Enter an incorrect or expired code and confirm access is denied.
 - Resend a code, confirm the prior code no longer works, then verify the newest code and confirm the dashboard opens.
@@ -35,11 +37,13 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Open Terms, Privacy, and Cookies & App Storage from sign-up; Profile > Privacy & Legal contains Terms and Privacy only.
 - Confirm Profile > App updates checks the latest-version manifest, shows the JengaBiz-colored update page, and presents the Android installer only after the APK checksum passes. Android must ask the user to confirm installation.
 - Expand Refer & Earn and allow device location; confirm there are no editable country/county fields and the invite URL contains an opaque code rather than account email. Verify the app accepts Kenya and blocks other countries. Open the link, enter the displayed code during signup, and verify by email. Confirm same-county signups add 50 JengaBiz points, different Kenyan counties add 75, each referred account counts once, and no international referral rate is offered.
+- Tap Invite a contact and confirm read-only contacts permission is requested only then, the system contact picker opens, and the chosen contact is not uploaded or saved. Denying access must leave link copy/share available.
 - Open Home, Analytics, Stock, Notifications, and Profile; verify navigation and scrolling.
 - Open Stock and confirm there is no inventory-metrics card, title, or dispatch banner; the PDF/add/sort icons remain, search stays visible, and status/category filters scroll away with the inventory.
 - Add or adjust stock and confirm the dashboard totals update.
 - Add a product with name, category, SKU, buying and selling prices, quantity, and low-stock threshold. Edit its details, restock with `+`, record a sale with `−`, remove it, and confirm each change syncs to the account and appears on a second device.
 - Add a category from the product form and filter inventory by category. Upload a product photo, then verify its preview and that the image appears in the inventory card.
+- Confirm the Android system media picker shares only the selected product photo and JengaBiz does not request full photo/video library access.
 - With network disabled, add a product photo, close and reopen the app, and confirm both the photo and product remain available. Re-enable network, wait for sync, and confirm the photo appears on a second signed-in device. Confirm previously viewed photos load from the local cache while offline.
 - Export a stock PDF from Stock & Inventory and Analytics. Confirm the JengaBiz logo, shop name, current totals, item ID/name/category/SKU, buying and selling prices, on-hand and sold quantities, reorder point, image URL, and MF Technologies email/phone details appear in the shareable PDF.
 - Confirm Biometric login, Push notifications, and Weekly email report default to on, remain saved after app restart, and preserve a user's explicit off selection.
@@ -53,7 +57,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, and `1.1.0+11` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, `1.1.0+11`, and `1.1.1+12` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
 Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing page uses the versioned APK URL in the manifest with immutable caching; `/downloads/latest/JengaBiz.apk` remains the stable fallback path.
 
@@ -121,10 +125,19 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - The target account's server inventory was backed up and seeded with 23 additional sample electronics/accessory products (24 rows total). Other account, session, reward, and stock counts were unchanged.
 - Release `1.0.9+10` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,572,062 bytes; SHA-256 is `20f2234a20da11daa821bcc6f50e1ed91e8c6db76c9e1720f705a67bea5fd558`.
 
-## Current in-app update (2026-11-23; v1.1.0+11)
+## Previous in-app update (2026-11-23; v1.1.0+11)
 
 - Mobile account, referral, stock, and image requests now use the landing-page hostname; Nginx proxies those requests to the existing API gateway and account service.
 - The stock screen automatically syncs when opened. Concurrent startup, resume, and screen-entry syncs share one request, and an empty offline cache cannot replace a populated server inventory.
 - Removed the manual “Load saved stock” action. Sign-in, startup, app resume, and opening Stock trigger inventory sync automatically.
 - Removed the Cookies & App Storage profile/auth links; Terms of Use and Privacy Policy remain in the app.
 - Release `1.1.0+11` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,571,745 bytes; SHA-256 is `ea1cb437c54ad06716d7ff280b550e5795028de0dadf9c093d642c1ac87b251d`.
+
+## Current in-app update (2026-11-23; v1.1.1+12)
+
+- First-time users see the welcome screen once. Returning users go from splash to sign-in or directly to home for a saved session. Explore opens sign-in immediately while update availability loads in the background.
+- Sign-in includes a compact underlined Forgot password action next to fingerprint sign-in. Password reset uses email OTP, then a new password and confirmation; the server revokes all sessions after a successful reset.
+- Refer & Earn can select one contact after requesting read-only contacts permission. The chosen name is used in the Android share sheet; the address book is not uploaded or saved.
+- Stock images use Android's system media picker, which grants access only to the selected photo. The app does not request broad photo/video library access; video is not supported for stock records.
+- The production `jengabiz-email-otp` service was restarted to activate `/email-auth/reset-password`; its internal health endpoint returned HTTP 200.
+- Release `1.1.1+12` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,671,402 bytes; SHA-256 is `e483ab4dafc45f62f204c1039c16611a33031433ff2d9f1f440e4bb373a4602a`.

@@ -403,6 +403,21 @@ export function createAccountStore(db, { now = Date.now } = {}) {
     return { sessionToken, user: profile(row) };
   }
 
+  function resetPassword(email, password) {
+    const account = db.prepare('SELECT id FROM accounts WHERE email = ?').get(email);
+    if (!account) return false;
+
+    const salt = randomBytes(16);
+    const digest = passwordDigest(password, salt);
+    return withTransaction(() => {
+      const updated = db.prepare(`
+        UPDATE accounts SET password_salt = ?, password_hash = ? WHERE id = ?
+      `).run(salt.toString('hex'), digest, account.id);
+      db.prepare('DELETE FROM sessions WHERE account_id = ?').run(account.id);
+      return updated.changes === 1;
+    });
+  }
+
   function authenticate(token) {
     if (typeof token !== 'string' || token.length < 40 || token.length > 128) return null;
     const tokenHash = hashToken(token);
@@ -506,6 +521,7 @@ export function createAccountStore(db, { now = Date.now } = {}) {
     updateReferralLocation,
     getReferralSummary,
     login,
+    resetPassword,
     authenticate,
     listStock,
     replaceStock,

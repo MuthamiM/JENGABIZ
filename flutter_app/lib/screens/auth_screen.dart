@@ -23,6 +23,9 @@ class _AuthScreenState extends State<AuthScreen> {
   bool isVerifyingCode = false;
   bool _needsAccountMigration = false;
   bool _acceptedTerms = false;
+  bool _isPasswordReset = false;
+  bool _resetOtpVerified = false;
+  String? _resetVerificationToken;
 
   final _nameCtrl = TextEditingController();
   final _shopCtrl = TextEditingController();
@@ -30,6 +33,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _referralCodeCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _confirmPasswordCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
 
   bool _loading = false;
@@ -63,6 +67,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _referralCodeCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
+    _confirmPasswordCtrl.dispose();
     _otpCtrl.dispose();
     super.dispose();
   }
@@ -74,6 +79,19 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
+      if (_isPasswordReset) {
+        final email = _emailCtrl.text.trim();
+        if (email.isEmpty || !email.contains('@')) {
+          throw const FormatException('Enter your account email address.');
+        }
+        if (_resetOtpVerified) {
+          await _completePasswordReset();
+        } else {
+          await _requestEmailCode(email);
+        }
+        return;
+      }
+
       if (isSignUp && !_acceptedTerms) {
         throw const FormatException(
           'Agree to the Terms of Use and Privacy Policy to create an account.',
@@ -212,6 +230,92 @@ class _AuthScreenState extends State<AuthScreen> {
     });
   }
 
+  void _startPasswordReset() {
+    setState(() {
+      isSignUp = false;
+      isVerifyingCode = false;
+      _isPasswordReset = true;
+      _resetOtpVerified = false;
+      _resetVerificationToken = null;
+      _needsAccountMigration = false;
+      _passwordCtrl.clear();
+      _confirmPasswordCtrl.clear();
+      _otpCtrl.clear();
+      _error = null;
+    });
+  }
+
+  Future<void> _completePasswordReset() async {
+    final password = _passwordCtrl.text;
+    if (password.length < 8) {
+      throw const FormatException('Use a password with at least 8 characters.');
+    }
+    if (password != _confirmPasswordCtrl.text) {
+      throw const FormatException('The new passwords do not match.');
+    }
+    final verificationToken = _resetVerificationToken;
+    if (verificationToken == null) {
+      throw const FormatException(
+          'Verify your email before changing password.');
+    }
+
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final response = await JengaApiService.instance.resetAccountPassword(
+      email: email,
+      verificationToken: verificationToken,
+      newPassword: password,
+    );
+    if (response?.succeeded != true) {
+      throw FormatException(
+        response?.data['message'] as String? ??
+            'Could not reset your password. Request a new email code and try again.',
+      );
+    }
+
+    final api = JengaApiService.instance;
+    if (api.sessionEmail == email) await api.clearSession();
+    if (!mounted) return;
+    setState(() {
+      _isPasswordReset = false;
+      _resetOtpVerified = false;
+      _resetVerificationToken = null;
+      isVerifyingCode = false;
+      _passwordCtrl.clear();
+      _confirmPasswordCtrl.clear();
+      _otpCtrl.clear();
+      _error = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Password reset. Sign in with your new password.'),
+        backgroundColor: Color(0xFF1E6BFF),
+      ),
+    );
+  }
+
+  void _handleBack() {
+    if (isVerifyingCode) {
+      setState(() {
+        isVerifyingCode = false;
+        _otpCtrl.clear();
+        _error = null;
+      });
+      return;
+    }
+    if (_isPasswordReset) {
+      setState(() {
+        _isPasswordReset = false;
+        _resetOtpVerified = false;
+        _resetVerificationToken = null;
+        _passwordCtrl.clear();
+        _confirmPasswordCtrl.clear();
+        _error = null;
+      });
+      return;
+    }
+    widget.onBack();
+  }
+
   Future<bool> _activateRemoteAccount(
     Map<String, dynamic> response,
     String password,
@@ -264,6 +368,19 @@ class _AuthScreenState extends State<AuthScreen> {
       if (verificationToken == null) {
         throw const FormatException(
             'That code is invalid or expired. Request another code and try again.');
+      }
+
+      if (_isPasswordReset) {
+        if (!mounted) return;
+        setState(() {
+          _resetVerificationToken = verificationToken;
+          _resetOtpVerified = true;
+          isVerifyingCode = false;
+          _passwordCtrl.clear();
+          _confirmPasswordCtrl.clear();
+          _error = null;
+        });
+        return;
       }
 
       final localUser = JengaDB.instance.findUser(_emailCtrl.text.trim());
@@ -415,6 +532,8 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     const kBlue = Color(0xFF1E6BFF);
+    final resetEmailStage = _isPasswordReset && !_resetOtpVerified;
+    final resetPasswordStage = _isPasswordReset && _resetOtpVerified;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8FF),
@@ -428,9 +547,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 alignment: Alignment.centerLeft,
                 child: IconButton(
                   icon: const Icon(Icons.arrow_back_rounded),
-                  onPressed: isVerifyingCode
-                      ? () => setState(() => isVerifyingCode = false)
-                      : widget.onBack,
+                  onPressed: _handleBack,
                 ),
               ),
               const SizedBox(height: 8),
@@ -518,8 +635,10 @@ class _AuthScreenState extends State<AuthScreen> {
                                   strokeWidth: 2.5,
                                 ),
                               )
-                            : const Text(
-                                'Verify Code & Open JengaBiz',
+                            : Text(
+                                _isPasswordReset
+                                    ? 'Verify Email'
+                                    : 'Verify Code & Open JengaBiz',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
@@ -547,7 +666,13 @@ class _AuthScreenState extends State<AuthScreen> {
               ] else ...[
                 // SIGN UP / SIGN IN TABS
                 Text(
-                  isSignUp ? 'Create Shop Account' : 'Sign In',
+                  _isPasswordReset
+                      ? resetPasswordStage
+                          ? 'Create New Password'
+                          : 'Reset Password'
+                      : isSignUp
+                          ? 'Create Shop Account'
+                          : 'Sign In',
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w800,
@@ -557,111 +682,121 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  isSignUp
-                      ? 'Set up your business profile to start managing stock'
-                      : 'Sign in to access your shop ledger and inventory',
+                  _isPasswordReset
+                      ? resetPasswordStage
+                          ? 'Set a new password for ${_emailCtrl.text.trim()}'
+                          : 'Enter your account email to receive a verification code.'
+                      : isSignUp
+                          ? 'Set up your business profile to start managing stock'
+                          : 'Sign in to access your shop ledger and inventory',
                   textAlign: TextAlign.center,
                   style:
                       const TextStyle(fontSize: 13, color: Color(0xFF777487)),
                 ),
                 const SizedBox(height: 24),
 
-                // Segmented Toggle
-                Container(
-                  height: 46,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8EEF8),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() {
-                            if (!isSignUp) {
-                              _nameCtrl.clear();
-                              _shopCtrl.clear();
-                              _phoneCtrl.clear();
-                              _referralCodeCtrl.clear();
-                              _detectedReferralCounty = null;
-                              _emailCtrl.clear();
-                              _passwordCtrl.clear();
-                              _otpCtrl.clear();
+                if (!_isPasswordReset) ...[
+                  // Segmented Toggle
+                  Container(
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8EEF8),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              if (!isSignUp) {
+                                _nameCtrl.clear();
+                                _shopCtrl.clear();
+                                _phoneCtrl.clear();
+                                _referralCodeCtrl.clear();
+                                _detectedReferralCounty = null;
+                                _emailCtrl.clear();
+                                _passwordCtrl.clear();
+                                _otpCtrl.clear();
+                                _acceptedTerms = false;
+                              }
+                              isSignUp = true;
+                              _needsAccountMigration = false;
+                              _error = null;
+                            }),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isSignUp
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: isSignUp
+                                    ? const [
+                                        BoxShadow(
+                                          color: Color(0x15000000),
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2),
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'New Account',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: isSignUp
+                                      ? kBlue
+                                      : const Color(0xFF777487),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              isSignUp = false;
                               _acceptedTerms = false;
-                            }
-                            isSignUp = true;
-                            _needsAccountMigration = false;
-                            _error = null;
-                          }),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color:
-                                  isSignUp ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: isSignUp
-                                  ? const [
-                                      BoxShadow(
-                                        color: Color(0x15000000),
-                                        blurRadius: 8,
-                                        offset: Offset(0, 2),
-                                      )
-                                    ]
-                                  : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              'New Account',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                                color:
-                                    isSignUp ? kBlue : const Color(0xFF777487),
+                              _needsAccountMigration = false;
+                              _error = null;
+                            }),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: !isSignUp
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: !isSignUp
+                                    ? const [
+                                        BoxShadow(
+                                          color: Color(0x15000000),
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2),
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Sign In',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: !isSignUp
+                                      ? kBlue
+                                      : const Color(0xFF777487),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() {
-                            isSignUp = false;
-                            _acceptedTerms = false;
-                            _needsAccountMigration = false;
-                            _error = null;
-                          }),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color:
-                                  !isSignUp ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: !isSignUp
-                                  ? const [
-                                      BoxShadow(
-                                        color: Color(0x15000000),
-                                        blurRadius: 8,
-                                        offset: Offset(0, 2),
-                                      )
-                                    ]
-                                  : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              'Sign In',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                                color:
-                                    !isSignUp ? kBlue : const Color(0xFF777487),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
+                  const SizedBox(height: 20),
+                ],
 
                 if (_error != null)
                   Container(
@@ -718,22 +853,63 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 14),
                 ],
 
-                _field(
-                  label: 'Email Address',
-                  controller: _emailCtrl,
-                  icon: Icons.mail_outline_rounded,
-                  hint: 'alex@jengabiz.com',
-                  keyboard: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 14),
-                _field(
-                  label: 'Password',
-                  controller: _passwordCtrl,
-                  icon: Icons.lock_outline_rounded,
-                  hint: 'At least 8 characters',
-                  obscure: true,
-                  keyboard: TextInputType.visiblePassword,
-                ),
+                if (!resetPasswordStage) ...[
+                  _field(
+                    label: 'Email Address',
+                    controller: _emailCtrl,
+                    icon: Icons.mail_outline_rounded,
+                    hint: 'alex@jengabiz.com',
+                    keyboard: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 14),
+                ] else ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE4E6F0)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_outlined,
+                            size: 20, color: Color(0xFF1E6BFF)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Email verified: ${_emailCtrl.text.trim()}',
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF4A475C)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+
+                if (!resetEmailStage) ...[
+                  _field(
+                    label: _isPasswordReset ? 'New Password' : 'Password',
+                    controller: _passwordCtrl,
+                    icon: Icons.lock_outline_rounded,
+                    hint: 'At least 8 characters',
+                    obscure: true,
+                    keyboard: TextInputType.visiblePassword,
+                  ),
+                  if (resetPasswordStage) ...[
+                    const SizedBox(height: 14),
+                    _field(
+                      label: 'Repeat New Password',
+                      controller: _confirmPasswordCtrl,
+                      icon: Icons.lock_outline_rounded,
+                      hint: 'Enter the new password again',
+                      obscure: true,
+                      keyboard: TextInputType.visiblePassword,
+                    ),
+                  ],
+                ],
 
                 if (isSignUp) ...[
                   const SizedBox(height: 8),
@@ -795,9 +971,13 @@ class _AuthScreenState extends State<AuthScreen> {
                                 ),
                               )
                             : Text(
-                                isSignUp
-                                    ? 'Create Account & Verify Email'
-                                    : 'Sign In',
+                                _isPasswordReset
+                                    ? resetPasswordStage
+                                        ? 'Reset Password'
+                                        : 'Send Email Code'
+                                    : isSignUp
+                                        ? 'Create Account & Verify Email'
+                                        : 'Sign In',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
@@ -810,27 +990,65 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
 
-                if (!isSignUp &&
-                    _canUseBiometrics &&
-                    JengaDB.instance.users.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _loading ? null : _signInWithBiometrics,
-                    style: TextButton.styleFrom(
-                      foregroundColor: kBlue,
-                      minimumSize: Size.zero,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 6),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text(
-                      'Sign in with fingerprint',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        decoration: TextDecoration.underline,
+                if (!isSignUp && !_isPasswordReset) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _loading ? null : _startPasswordReset,
+                            style: TextButton.styleFrom(
+                              foregroundColor: kBlue,
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 2, vertical: 5),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: const Text(
+                              'Forgot password?',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      if (_canUseBiometrics &&
+                          JengaDB.instance.users.isNotEmpty)
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed:
+                                  _loading ? null : _signInWithBiometrics,
+                              style: TextButton.styleFrom(
+                                foregroundColor: kBlue,
+                                minimumSize: Size.zero,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 2, vertical: 5),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              child: const Text(
+                                'Sign in with fingerprint',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
 

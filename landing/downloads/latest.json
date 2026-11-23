@@ -1,13 +1,14 @@
 {
-  "version_name": "1.1.0",
-  "version_code": 11,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.0/JengaBiz-1.1.0.apk",
-  "sha256": "ea1cb437c54ad06716d7ff280b550e5795028de0dadf9c093d642c1ac87b251d",
+  "version_name": "1.1.1",
+  "version_code": 12,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.1/JengaBiz-1.1.1.apk",
+  "sha256": "e483ab4dafc45f62f204c1039c16611a33031433ff2d9f1f440e4bb373a4602a",
   "release_notes": [
-    "Account, referral, and stock sync now use the main JengaBiz hostname.",
-    "Saved stock loads automatically after sign-in, app startup, resume, and opening Stock.",
-    "Removed the manual Load saved stock button; offline inventory remains cached and retries automatically.",
-    "An empty offline cache cannot replace a populated account inventory.",
-    "Terms of Use and Privacy Policy remain in the app; Cookies & App Storage was removed."
+    "First-time users see the welcome screen once; later launches open sign-in or the signed-in home directly after splash.",
+    "Explore opens sign-in immediately without waiting for the update check.",
+    "Forgot password now verifies an email OTP, then lets you enter and repeat a new password.",
+    "Password reset revokes existing sessions so the new password is required on other devices.",
+    "Refer & Earn can invite a selected contact after read-only Contacts permission is granted.",
+    "Stock images use Android's system picker, which shares only the photo you select."
   ]
 }

@@ -206,6 +206,17 @@ class JengaApiService {
     return token;
   }
 
+  Future<JengaApiResponse?> resetAccountPassword({
+    required String email,
+    required String verificationToken,
+    required String newPassword,
+  }) =>
+      _requestJson('POST', '/email-auth/reset-password', payload: {
+        'email': email.trim().toLowerCase(),
+        'verificationToken': verificationToken,
+        'newPassword': newPassword,
+      });
+
   Future<JengaApiResponse?> loginAccount(String email, String password) =>
       _requestJson('POST', '/email-auth/login', payload: {
         'email': email.trim().toLowerCase(),

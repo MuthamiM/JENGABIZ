@@ -382,7 +382,7 @@ class _ProductEditorDialogState extends State<ProductEditorDialog> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'JPEG, PNG or WebP · up to 1 MB',
+                      'JPEG, PNG or WebP · up to 1 MB · only the photo you select is shared',
                       style: TextStyle(fontSize: 11, color: Color(0xFF777487)),
                     ),
                   ),

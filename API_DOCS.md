@@ -121,6 +121,9 @@ Referral code and county are optional. When a referral code is used, the Android
 #### `POST /email-auth/login`
 Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. Sessions remain valid until the user signs out or the server revokes the session. The server stores only the token hash; the Android app stores the token in secure storage.
 
+#### `POST /email-auth/reset-password`
+Public route that requires an email verification grant returned by `POST /email-auth/verify-otp`. Accepts `{ "email": "owner@example.com", "verificationToken": "<single-use-token>", "newPassword": "<password>" }`. The new password must contain at least 8 characters. The server hashes it with a new random salt, consumes the verification grant, and revokes all sessions for that account. The user signs in again with the new password.
+
 #### `GET /email-auth/me`
 Returns the signed-in account profile and renews the active session. The app uses this route on startup to resume a saved secure session without asking for the password again.
 
