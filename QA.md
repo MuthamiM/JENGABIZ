@@ -57,7 +57,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 
 ## Android release
 
-Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, `1.1.0+11`, and `1.1.1+12` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
+Release versions `1.0.6+7`, `1.0.7+8`, `1.0.8+9`, `1.0.9+10`, `1.1.0+11`, `1.1.1+12`, and `1.1.2+13` are signed with the dedicated local Android release keystore. Keep `flutter_app/android/key.properties` and `flutter_app/android/app/jengabiz-release.jks` backed up securely; both are ignored by Git and must be reused to sign future updates. Do not publish either file. The APK itself is signed, and visitors use the site's trusted HTTPS certificate without installing anything.
 
 Versions through v1.0.5 need one manual install of v1.0.6 because they do not contain the updater. From v1.0.6 onward, the app checks `/downloads/latest.json` on startup and from Profile > App updates. It downloads only HTTPS APKs from `jengabiz.mftechnologies.org`, verifies the SHA-256 from the manifest, then opens Android's package installer. Android still requires the user to approve installation. The landing page uses the versioned APK URL in the manifest with immutable caching; `/downloads/latest/JengaBiz.apk` remains the stable fallback path.
 
@@ -133,7 +133,7 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - Removed the Cookies & App Storage profile/auth links; Terms of Use and Privacy Policy remain in the app.
 - Release `1.1.0+11` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,571,745 bytes; SHA-256 is `ea1cb437c54ad06716d7ff280b550e5795028de0dadf9c093d642c1ac87b251d`.
 
-## Current in-app update (2026-11-23; v1.1.1+12)
+## Previous in-app update (2026-11-23; v1.1.1+12)
 
 - First-time users see the welcome screen once. Returning users go from splash to sign-in or directly to home for a saved session. Explore opens sign-in immediately while update availability loads in the background.
 - Sign-in includes a compact underlined Forgot password action next to fingerprint sign-in. Password reset uses email OTP, then a new password and confirmation; the server revokes all sessions after a successful reset.
@@ -141,3 +141,8 @@ Firebase Cloud Messaging uses project `jengabiz-mftechnologies` and the Android 
 - Stock images use Android's system media picker, which grants access only to the selected photo. The app does not request broad photo/video library access; video is not supported for stock records.
 - The production `jengabiz-email-otp` service was restarted to activate `/email-auth/reset-password`; its internal health endpoint returned HTTP 200.
 - Release `1.1.1+12` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,671,402 bytes; SHA-256 is `e483ab4dafc45f62f204c1039c16611a33031433ff2d9f1f440e4bb373a4602a`.
+
+## Current in-app update (2026-11-23; v1.1.2+13)
+
+- Grouped the underlined Forgot password and fingerprint sign-in links together beneath the main Sign In button. They stay centered with a small gap and wrap on narrow screens.
+- Release `1.1.2+13` is signed as `com.dukaledger.duka_ledger` with the existing release certificate. APK size is 27,671,792 bytes; SHA-256 is `1710bfe00448051a461c2d931673a1c8f76a88bfe06bf5c6f49fd28682c5c863`.

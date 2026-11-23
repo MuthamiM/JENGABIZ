@@ -992,63 +992,58 @@ class _AuthScreenState extends State<AuthScreen> {
 
                 if (!isSignUp && !_isPasswordReset) ...[
                   const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: _loading ? null : _startPasswordReset,
+                  Align(
+                    alignment: Alignment.center,
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      children: [
+                        TextButton(
+                          onPressed: _loading ? null : _startPasswordReset,
+                          style: TextButton.styleFrom(
+                            foregroundColor: kBlue,
+                            minimumSize: Size.zero,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 5),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text(
+                            'Forgot password?',
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                        if (_canUseBiometrics &&
+                            JengaDB.instance.users.isNotEmpty)
+                          TextButton(
+                            onPressed: _loading ? null : _signInWithBiometrics,
                             style: TextButton.styleFrom(
                               foregroundColor: kBlue,
                               minimumSize: Size.zero,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 2, vertical: 5),
+                                  horizontal: 4, vertical: 5),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               visualDensity: VisualDensity.compact,
                             ),
                             child: const Text(
-                              'Forgot password?',
+                              'Sign in with fingerprint',
                               maxLines: 1,
+                              softWrap: false,
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w600,
                                 decoration: TextDecoration.underline,
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                      if (_canUseBiometrics &&
-                          JengaDB.instance.users.isNotEmpty)
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed:
-                                  _loading ? null : _signInWithBiometrics,
-                              style: TextButton.styleFrom(
-                                foregroundColor: kBlue,
-                                minimumSize: Size.zero,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 2, vertical: 5),
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              child: const Text(
-                                'Sign in with fingerprint',
-                                maxLines: 1,
-                                softWrap: false,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
 
