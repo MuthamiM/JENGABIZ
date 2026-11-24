@@ -196,6 +196,7 @@ class JengaApiService {
     String path, {
     Map<String, dynamic>? payload,
     String? authTokenOverride,
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     final uri = Uri.parse('$baseUrl$path');
     final requestOverride = _requestJsonOverride;
@@ -210,18 +211,18 @@ class JengaApiService {
 
     try {
       final req = switch (method) {
-        'GET' => await _client!.getUrl(uri),
-        'PUT' => await _client!.putUrl(uri),
-        'DELETE' => await _client!.deleteUrl(uri),
-        _ => await _client!.postUrl(uri),
+        'GET' => await _client!.getUrl(uri).timeout(timeout),
+        'PUT' => await _client!.putUrl(uri).timeout(timeout),
+        'DELETE' => await _client!.deleteUrl(uri).timeout(timeout),
+        _ => await _client!.postUrl(uri).timeout(timeout),
       };
       _applyHeaders(req.headers, authTokenOverride: authTokenOverride);
       if (payload != null) req.write(jsonEncode(payload));
-      final res = await req.close().timeout(const Duration(seconds: 10));
+      final res = await req.close().timeout(timeout);
       final body = await res
           .transform(utf8.decoder)
           .join()
-          .timeout(const Duration(seconds: 10));
+          .timeout(timeout);
       if (body.isEmpty) {
         return JengaApiResponse(res.statusCode, const {});
       }
@@ -285,11 +286,16 @@ class JengaApiService {
     required String password,
     required String reason,
   }) =>
-      _requestJson('POST', '/email-auth/support/request', payload: {
-        'email': email.trim().toLowerCase(),
-        'password': password,
-        'reason': reason.trim(),
-      });
+      _requestJson(
+        'POST',
+        '/email-auth/support/request',
+        payload: {
+          'email': email.trim().toLowerCase(),
+          'password': password,
+          'reason': reason.trim(),
+        },
+        timeout: const Duration(seconds: 30),
+      );
 
   Future<JengaApiResponse?> fetchAccountProfile() =>
       _requestJson('GET', '/email-auth/me');

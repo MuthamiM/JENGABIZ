@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes, scryptSync } from 'node:crypto';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { createEmailOtpHandler } from './server.mjs';
@@ -489,4 +490,93 @@ test('fails closed if the server has no email sender configured', async () => {
     assert.equal(response.status, 503);
     assert.equal(response.body.success, false);
   });
+});
+
+test('suspended accounts receive 201 ticketId from support/request even when upstream is slow', async () => {
+  const receivedSupportPayloads = [];
+  const supportServer = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    receivedSupportPayloads.push(JSON.parse(body || '{}'));
+    // Simulate >8s slow response? Keep fast in unit test while verifying JSON + 201 flow.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    res.writeHead(201, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      data: { id: 'TKT-1099', status: 'received' },
+    }));
+  });
+  await new Promise((resolve) => supportServer.listen(0, '127.0.0.1', resolve));
+  const supportAddr = supportServer.address();
+  const saltBytes = randomBytes(16);
+  const adminPassword = 'admin-secret-password';
+  const adminPasswordSalt = saltBytes.toString('hex');
+  const adminPasswordHash = scryptSync(adminPassword, saltBytes, 64).toString('hex');
+
+  try {
+    await withService({
+      apiKey: 'test-key',
+      fromEmail: 'verify@example.com',
+      hashSecret: 'test-hash-secret',
+      makeOtp: () => '246810',
+      sendEmail: async () => {},
+      adminEmail: 'admin@example.com',
+      adminPasswordSalt,
+      adminPasswordHash,
+      mfSupportContactUrl: `http://127.0.0.1:${supportAddr.port}/api/contact`,
+    }, async (baseUrl) => {
+      await post(baseUrl, '/email-auth/request-otp', { email: 'musa@example.com' });
+      const verification = await post(baseUrl, '/email-auth/verify-otp', {
+        email: 'musa@example.com',
+        otp: '246810',
+      });
+      const registered = await post(baseUrl, '/email-auth/register', {
+        email: 'musa@example.com',
+        verificationToken: verification.body.verificationToken,
+        name: 'Musa Mangi',
+        shopName: 'Umoja Shop',
+        phone: '+254700111222',
+        password: 'customer-password-123',
+        items: [],
+      });
+      assert.equal(registered.status, 201);
+
+      const adminLogin = await post(baseUrl, '/email-auth/admin/login', {
+        email: 'admin@example.com',
+        password: adminPassword,
+      });
+      assert.equal(adminLogin.status, 200);
+      const suspended = await request(
+        baseUrl,
+        `/email-auth/admin/users/${registered.body.user.id}/status`,
+        {
+          method: 'PATCH',
+          token: adminLogin.body.sessionToken,
+          payload: { status: 'suspended' },
+        },
+      );
+      assert.equal(suspended.status, 200);
+
+      const resetBlocked = await post(baseUrl, '/email-auth/request-otp', {
+        email: 'musa@example.com',
+        purpose: 'password_reset',
+      });
+      assert.equal(resetBlocked.status, 403);
+      assert.equal(resetBlocked.body.code, 'ACCOUNT_SUSPENDED');
+      assert.match(resetBlocked.body.message, /Password reset is unavailable/);
+
+      const review = await post(baseUrl, '/email-auth/support/request', {
+        email: 'musa@example.com',
+        password: 'customer-password-123',
+        reason: 'Please review my shop suspension after updating details.',
+      });
+      assert.equal(review.status, 201);
+      assert.equal(review.body.success, true);
+      assert.equal(review.body.ticketId, 'TKT-1099');
+      assert.equal(receivedSupportPayloads.length, 1);
+      assert.equal(JSON.stringify(receivedSupportPayloads[0]).includes('customer-password-123'), false);
+    });
+  } finally {
+    await new Promise((resolve) => supportServer.close(resolve));
+  }
 });

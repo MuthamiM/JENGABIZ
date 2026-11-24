@@ -903,7 +903,7 @@ export function createEmailOtpHandler({
                 'Contact the customer at the registered email if the request qualifies for reactivation.',
               ].join('\n'),
             }),
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(25000),
           });
           mfPayload = await mfResponse.json();
         } catch {

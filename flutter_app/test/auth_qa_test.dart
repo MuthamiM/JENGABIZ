@@ -200,4 +200,58 @@ void main() {
     expect(find.text('Phone Number (optional)'), findsOneWidget);
     expect(find.text('Create Account & Verify Email'), findsOneWidget);
   });
+
+  testWidgets(
+      'suspended password reset shows Get help without phone numbers or email',
+      (tester) async {
+    final api = JengaApiService.forTestingRequests((method, uri, payload) async {
+      return const JengaApiResponse(403, {
+        'success': false,
+        'code': 'ACCOUNT_SUSPENDED',
+        'message':
+            'Password reset is unavailable for this suspended account. Contact MF Technologies support.',
+        'support': {
+          'name': 'MF Technologies',
+          'email': 'info@mftechnologies.org',
+          'phoneNumbers': ['0748329410', '0712742991'],
+        },
+      });
+    });
+    JengaDB.instance.users = [
+      JengaUser(
+        id: 'suspended-user',
+        name: 'Suspended User',
+        shopName: 'Suspended Shop',
+        phone: '+254700000000',
+        email: 'suspended@example.com',
+        createdAt: DateTime.now().toIso8601String(),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthScreen(
+          onSuccess: () {},
+          onBack: () {},
+          apiService: api,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Forgot password?'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send Email Code'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+          'Password reset is unavailable for this suspended account. Contact MF Technologies support.'),
+      findsOneWidget,
+    );
+    expect(find.text('Get help'), findsOneWidget);
+    expect(find.text('info@mftechnologies.org'), findsNothing);
+    expect(find.text('0748329410'), findsNothing);
+    expect(find.text('0712742991'), findsNothing);
+  });
 }

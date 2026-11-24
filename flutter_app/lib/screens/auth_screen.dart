@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../legal_documents.dart';
 import '../services/db_service.dart';
 import '../services/api_service.dart';
@@ -13,15 +11,22 @@ import '../services/location_biometric_service.dart';
 import 'suspended_account_help_screen.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key, required this.onSuccess, required this.onBack});
+  const AuthScreen({
+    super.key,
+    required this.onSuccess,
+    required this.onBack,
+    this.apiService,
+  });
   final VoidCallback onSuccess;
   final VoidCallback onBack;
+  final JengaApiService? apiService;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
 class _AuthScreenState extends State<AuthScreen> {
+  JengaApiService get _api => widget.apiService ?? JengaApiService.instance;
   bool isSignUp = true;
   bool isVerifyingCode = false;
   bool _needsAccountMigration = false;
@@ -127,7 +132,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
       if (!isSignUp) {
         final user = JengaDB.instance.findUser(email);
-        final api = JengaApiService.instance;
+        final api = _api;
         if (api.authToken != null && api.sessionEmail != email.toLowerCase()) {
           await api.clearSession();
         }
@@ -231,7 +236,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _requestEmailCode(String email) async {
-    final response = await JengaApiService.instance.requestEmailOtp(
+    final response = await _api.requestEmailOtp(
       email,
       purpose: _isPasswordReset ? 'password_reset' : 'account_verification',
     );
@@ -281,7 +286,7 @@ class _AuthScreenState extends State<AuthScreen> {
     }
 
     final email = _emailCtrl.text.trim().toLowerCase();
-    final response = await JengaApiService.instance.resetAccountPassword(
+    final response = await _api.resetAccountPassword(
       email: email,
       verificationToken: verificationToken,
       newPassword: password,
@@ -296,7 +301,7 @@ class _AuthScreenState extends State<AuthScreen> {
       );
     }
 
-    final api = JengaApiService.instance;
+    final api = _api;
     if (api.sessionEmail == email) await api.clearSession();
     if (!mounted) return;
     setState(() {
@@ -350,7 +355,7 @@ class _AuthScreenState extends State<AuthScreen> {
       throw const FormatException(
           'JengaBiz returned an incomplete sign-in response.');
     }
-    await JengaApiService.instance.saveSession(
+    await _api.saveSession(
       token,
       email: profile['email'] as String? ?? '',
     );
@@ -386,7 +391,7 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
-      final verificationToken = await JengaApiService.instance.verifyEmailOtp(
+      final verificationToken = await _api.verifyEmailOtp(
         _emailCtrl.text.trim(),
         inputCode,
       );
@@ -425,7 +430,7 @@ class _AuthScreenState extends State<AuthScreen> {
           !isSignUp && _needsAccountMigration && localUser != null
               ? await JengaDB.instance.stockForAccount(localUser.id)
               : <Map<String, dynamic>>[];
-      final response = await JengaApiService.instance.createAccount(
+      final response = await _api.createAccount(
         email: _emailCtrl.text.trim(),
         verificationToken: verificationToken,
         name: profileName,
@@ -503,7 +508,7 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
-      final response = await JengaApiService.instance.requestEmailOtp(
+      final response = await _api.requestEmailOtp(
         _emailCtrl.text.trim(),
         purpose: _isPasswordReset ? 'password_reset' : 'account_verification',
       );
@@ -549,33 +554,6 @@ class _AuthScreenState extends State<AuthScreen> {
           .where((p) => p.isNotEmpty)
           .toList();
       if (values.isNotEmpty) _supportPhoneNumbers = values;
-    }
-  }
-
-  String _internationalSupportNumber(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('0')) return '+254${digits.substring(1)}';
-    if (digits.startsWith('254')) return '+$digits';
-    return '+$digits';
-  }
-
-  Future<void> _launchSupport(Uri uri, String fallbackText) async {
-    try {
-      final launched = await launchUrl(uri);
-      if (!launched && mounted) {
-        await Clipboard.setData(ClipboardData(text: fallbackText));
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact copied to clipboard.')),
-        );
-      }
-    } catch (_) {
-      if (!mounted) return;
-      await Clipboard.setData(ClipboardData(text: fallbackText));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact copied to clipboard.')),
-      );
     }
   }
 
@@ -635,42 +613,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   visualDensity: VisualDensity.compact,
                 ),
               ),
-            ),
-            Wrap(
-              spacing: 4,
-              runSpacing: 0,
-              children: [
-                TextButton.icon(
-                  onPressed: () => _launchSupport(
-                    Uri(scheme: 'mailto', path: _supportEmail),
-                    _supportEmail,
-                  ),
-                  icon: const Icon(Icons.email_outlined, size: 16),
-                  label: Text(_supportEmail),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF1E6BFF),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-                for (final phone in _supportPhoneNumbers)
-                  TextButton.icon(
-                    onPressed: () => _launchSupport(
-                      Uri(
-                        scheme: 'tel',
-                        path: _internationalSupportNumber(phone),
-                      ),
-                      phone,
-                    ),
-                    icon: const Icon(Icons.call_outlined, size: 16),
-                    label: Text(phone),
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF1E6BFF),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-              ],
             ),
           ],
         ],
