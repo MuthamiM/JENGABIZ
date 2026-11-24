@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../legal_documents.dart';
 import '../services/db_service.dart';
 import '../services/api_service.dart';
@@ -38,8 +40,15 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _loading = false;
   bool _canUseBiometrics = false;
+  bool _accountSuspended = false;
+  bool _supportRequestSending = false;
+  String? _supportTicketId;
   String? _detectedReferralCounty;
   String? _error;
+  String _supportName = 'MF Technologies';
+  String _supportAdminName = 'MF Technologies Admin';
+  String _supportEmail = 'info@mftechnologies.org';
+  List<String> _supportPhoneNumbers = const ['0748329410', '0712742991'];
 
   @override
   void initState() {
@@ -76,6 +85,8 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _accountSuspended = false;
+      _supportTicketId = null;
     });
 
     try {
@@ -137,6 +148,12 @@ class _AuthScreenState extends State<AuthScreen> {
           }
           if (mounted) widget.onSuccess();
           return;
+        }
+        if (response?.data['code'] == 'ACCOUNT_SUSPENDED') {
+          _applySuspensionSupport(response?.data['support']);
+          throw const FormatException(
+            'This account is suspended. Contact MF Technologies to request a review.',
+          );
         }
 
         final localPasswordValid = user?.passwordHash == null
@@ -217,8 +234,14 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _requestEmailCode(String email) async {
-    final response = await JengaApiService.instance.requestEmailOtp(email);
+    final response = await JengaApiService.instance.requestEmailOtp(
+      email,
+      purpose: _isPasswordReset ? 'password_reset' : 'account_verification',
+    );
     if (response?['success'] != true) {
+      if (response?['code'] == 'ACCOUNT_SUSPENDED') {
+        _applySuspensionSupport(response?['support']);
+      }
       throw HttpException(response?['message'] as String? ??
           'Could not send an email code. Check your connection and try again.');
     }
@@ -235,6 +258,7 @@ class _AuthScreenState extends State<AuthScreen> {
       isSignUp = false;
       isVerifyingCode = false;
       _isPasswordReset = true;
+      _accountSuspended = false;
       _resetOtpVerified = false;
       _resetVerificationToken = null;
       _needsAccountMigration = false;
@@ -266,6 +290,9 @@ class _AuthScreenState extends State<AuthScreen> {
       newPassword: password,
     );
     if (response?.succeeded != true) {
+      if (response?.data['code'] == 'ACCOUNT_SUSPENDED') {
+        _applySuspensionSupport(response?.data['support']);
+      }
       throw FormatException(
         response?.data['message'] as String? ??
             'Could not reset your password. Request a new email code and try again.',
@@ -358,6 +385,7 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _accountSuspended = false;
     });
 
     try {
@@ -474,12 +502,18 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _accountSuspended = false;
     });
 
     try {
-      final response = await JengaApiService.instance
-          .requestEmailOtp(_emailCtrl.text.trim());
+      final response = await JengaApiService.instance.requestEmailOtp(
+        _emailCtrl.text.trim(),
+        purpose: _isPasswordReset ? 'password_reset' : 'account_verification',
+      );
       if (response?['success'] != true) {
+        if (response?['code'] == 'ACCOUNT_SUSPENDED') {
+          _applySuspensionSupport(response?['support']);
+        }
         throw HttpException(response?['message'] as String? ??
             'Could not resend your email code. Check your connection and try again.');
       }
@@ -499,10 +533,239 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  void _applySuspensionSupport(dynamic rawSupport) {
+    _accountSuspended = true;
+    if (rawSupport is! Map) return;
+    final name = rawSupport['name'];
+    final adminName = rawSupport['adminName'];
+    final email = rawSupport['email'];
+    final phones = rawSupport['phoneNumbers'];
+    if (name is String && name.trim().isNotEmpty) {
+      _supportName = name.trim();
+    }
+    if (adminName is String && adminName.trim().isNotEmpty) {
+      _supportAdminName = adminName.trim();
+    }
+    if (email is String && email.trim().isNotEmpty) {
+      _supportEmail = email.trim();
+    }
+    if (phones is List) {
+      final values = phones
+          .whereType<String>()
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty)
+          .toList();
+      if (values.isNotEmpty) _supportPhoneNumbers = values;
+    }
+  }
+
+  String _internationalSupportNumber(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('0')) return '+254${digits.substring(1)}';
+    if (digits.startsWith('254')) return '+$digits';
+    return '+$digits';
+  }
+
+  Future<void> _launchSupport(Uri uri, String fallbackText) async {
+    try {
+      final launched = await launchUrl(uri);
+      if (!launched && mounted) {
+        await Clipboard.setData(ClipboardData(text: fallbackText));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Contact copied to clipboard.')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: fallbackText));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contact copied to clipboard.')),
+      );
+    }
+  }
+
+  Future<void> _requestSuspensionReview() async {
+    if (_supportRequestSending) return;
+    final shouldSend = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Send a review request?'),
+        content: Text(
+          'Your name, shop, email and phone number will be sent to $_supportName so the admin team can review this suspended account. Your password is used only to verify the account and is never sent to support.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Send request'),
+          ),
+        ],
+      ),
+    );
+    if (shouldSend != true || !mounted) return;
+
+    setState(() => _supportRequestSending = true);
+    try {
+      final response =
+          await JengaApiService.instance.requestSuspendedAccountSupport(
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+      );
+      if (response?.succeeded == true) {
+        final ticketId = response?.data['ticketId'] as String?;
+        if (!mounted) return;
+        setState(() {
+          _supportTicketId = ticketId;
+          _error = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ticketId == null
+                ? 'Review request sent to MF Technologies.'
+                : 'Review request sent. Reference: $ticketId'),
+          ),
+        );
+      } else {
+        final message = response?.data['message'] as String? ??
+            'Could not send the review request. Use the contact options below.';
+        if (response?.data['support'] != null) {
+          _applySuspensionSupport(response?.data['support']);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Could not reach MF Technologies. Use the contact options below.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _supportRequestSending = false);
+    }
+  }
+
+  Widget _errorPanel() {
+    final error = _error;
+    if (error == null && !_accountSuspended) return const SizedBox.shrink();
+    final requestSent = _accountSuspended && _supportTicketId != null;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: requestSent && error == null
+            ? const Color(0xFFEAF7EF)
+            : const Color(0xFFFFECEB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (error != null)
+            Text(error,
+                style: const TextStyle(color: Colors.red, fontSize: 13)),
+          if (_accountSuspended) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Contact $_supportName support. Your case is handled by $_supportAdminName.',
+              style: const TextStyle(
+                color: Color(0xFF343247),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            if (_supportTicketId case final ticketId?) ...[
+              Text(
+                'Request sent to MF Technologies · $ticketId',
+                style: const TextStyle(
+                  color: Color(0xFF197346),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ] else ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed:
+                      _supportRequestSending ? null : _requestSuspensionReview,
+                  icon: _supportRequestSending
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.outgoing_mail, size: 17),
+                  label: Text(_supportRequestSending
+                      ? 'Sending request…'
+                      : 'Send support request'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF1E6BFF),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ],
+            Wrap(
+              spacing: 4,
+              runSpacing: 0,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _launchSupport(
+                    Uri(scheme: 'mailto', path: _supportEmail),
+                    _supportEmail,
+                  ),
+                  icon: const Icon(Icons.email_outlined, size: 16),
+                  label: Text(_supportEmail),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF1E6BFF),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                for (final phone in _supportPhoneNumbers)
+                  TextButton.icon(
+                    onPressed: () => _launchSupport(
+                      Uri(
+                        scheme: 'tel',
+                        path: _internationalSupportNumber(phone),
+                      ),
+                      phone,
+                    ),
+                    icon: const Icon(Icons.call_outlined, size: 16),
+                    label: Text(phone),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF1E6BFF),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Future<void> _signInWithBiometrics() async {
     setState(() {
       _loading = true;
       _error = null;
+      _accountSuspended = false;
     });
 
     try {
@@ -579,20 +842,9 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                if (_error != null)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFECEB),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 13),
-                    ),
-                  ),
+                if (_error != null ||
+                    (_accountSuspended && _supportTicketId != null))
+                  _errorPanel(),
 
                 _field(
                   label: '6-Digit Verification Code',
@@ -639,7 +891,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                 _isPasswordReset
                                     ? 'Verify Email'
                                     : 'Verify Code & Open JengaBiz',
-                                style: TextStyle(
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -722,6 +974,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               }
                               isSignUp = true;
                               _needsAccountMigration = false;
+                              _accountSuspended = false;
                               _error = null;
                             }),
                             child: Container(
@@ -760,6 +1013,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               isSignUp = false;
                               _acceptedTerms = false;
                               _needsAccountMigration = false;
+                              _accountSuspended = false;
                               _error = null;
                             }),
                             child: Container(
@@ -798,20 +1052,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 20),
                 ],
 
-                if (_error != null)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFECEB),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 13),
-                    ),
-                  ),
+                if (_error != null ||
+                    (_accountSuspended && _supportTicketId != null))
+                  _errorPanel(),
 
                 if (isSignUp) ...[
                   _field(

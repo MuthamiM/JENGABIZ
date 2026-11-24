@@ -1,10 +1,12 @@
 {
-  "version_name": "1.1.3",
-  "version_code": 14,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.3/JengaBiz-1.1.3.apk",
-  "sha256": "4dcd00436038542c317d3c12f3634300f95210574edf3071e50a4e5e3ddb8cc0",
+  "version_name": "1.1.8",
+  "version_code": 19,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.8/JengaBiz-1.1.8.apk",
+  "sha256": "b3593cf4958c236c5cf8c7345d2be4be6afcfa5c5608226c80339f11687f3ee7",
   "release_notes": [
-    "A rejected sign-in session now offers a direct way to sign in again and reload Refer & Earn.",
-    "The Profile logout button is smaller and centered."
+    "Suspended accounts cannot request or receive password-reset email codes.",
+    "Customers can send a confirmed review request to the MF Technologies admin ticket queue.",
+    "The support request verifies the account in JengaBiz and never sends the password to MF Technologies.",
+    "Sign-out returns immediately while server revocation continues in the background."
   ]
 }

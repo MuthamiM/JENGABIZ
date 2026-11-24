@@ -33,6 +33,8 @@ The services are composed via `docker-compose.yml`:
 
 Cloudflare Tunnel sends the public landing hostname to port `5082` and the legacy API hostname to the gateway on port `5080`. The landing Nginx also proxies `/email-auth/*`, `/catalog/*`, `/summary/*`, `/sync/*`, and `/health` to the gateway. Mobile app requests use the landing hostname so account sync does not depend on a separate API DNS record. The gateway sends `/email-auth/*` to the Node account service on the Docker network at port `5081`, and all other API paths to the C# API. Both Nginx proxies preserve Cloudflare client IP headers for account rate limits.
 
+The JengaBiz account service also joins the existing `mf_mf-network` Docker network and submits confirmed suspended-account review requests to the M&F Technologies contact intake. M&F creates those requests as tickets in Admin > Tickets. JengaBiz verifies the account password itself and sends only the customer's account and contact details to M&F; the password is never forwarded.
+
 To start or restart the stack:
 ```bash
 docker compose up -d --build
@@ -64,11 +66,12 @@ JengaBiz uses a **Cache-Aside Pattern**:
 ### Authentication
 
 #### `POST /email-auth/request-otp`
-Sends a 6-digit, single-use account verification code to the supplied email address. Codes expire after 10 minutes. Resend is limited to once per minute and five sends per hour per address.
+Sends a 6-digit, single-use account verification code to the supplied email address. Codes expire after 10 minutes. Resend is limited to once per minute and five sends per hour per address. The optional `purpose` is `account_verification` (default) or `password_reset`. Suspended accounts cannot receive verification or password-reset codes; the API returns `403 ACCOUNT_SUSPENDED` with the configured MF Technologies support contact.
 - **Request Body**:
   ```json
   {
-    "email": "owner@example.com"
+    "email": "owner@example.com",
+    "purpose": "password_reset"
   }
   ```
 - **Response `200 OK`**:
@@ -119,10 +122,20 @@ Creates a mobile account after email verification. Migration is for an account p
 Referral code and county are optional. When a referral code is used, the Android app detects the device's location and reverse-geocodes the county; it sends the county only, and the service assigns the country as Kenya (`KE`). The inviter must have enabled location before the code can be applied. Successful responses return a bearer `sessionToken` and a profile without password data. Passwords are hashed server-side with scrypt and per-account random salts; account ownership is bound to the authenticated session.
 
 #### `POST /email-auth/login`
-Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. Sessions remain valid until the user signs out or the server revokes the session. The server stores only the token hash; the Android app stores the token in secure storage.
+Signs in with email and password, returns a bearer session token and the account profile, and throttles repeated failures by IP and email. Invalid credentials share one generic response. A correct password for a suspended account returns `403 ACCOUNT_SUSPENDED` and MF Technologies support details. Sessions remain valid until the user signs out or the server revokes the session. The server stores only the token hash; the Android app stores the token in secure storage.
 
 #### `POST /email-auth/reset-password`
-Public route that requires an email verification grant returned by `POST /email-auth/verify-otp`. Accepts `{ "email": "owner@example.com", "verificationToken": "<single-use-token>", "newPassword": "<password>" }`. The new password must contain at least 8 characters. The server hashes it with a new random salt, consumes the verification grant, and revokes all sessions for that account. The user signs in again with the new password.
+Public route that requires an email verification grant returned by `POST /email-auth/verify-otp`. Accepts `{ "email": "owner@example.com", "verificationToken": "<single-use-token>", "newPassword": "<password>" }`. The new password must contain at least 8 characters. Suspended accounts are rejected before a password change, including when the account is suspended after an OTP was issued. Otherwise, the server hashes it with a new random salt, consumes the verification grant, and revokes all sessions for that account. The user signs in again with the new password.
+
+#### `POST /email-auth/support/request`
+Creates a suspension-review ticket in the M&F Technologies admin ticket queue. The customer confirms this action in the app and provides the email and current password for JengaBiz to verify the suspended account. The password is never sent to M&F. The ticket contains the account name, email, optional phone, shop name, account ID, and request for review. The endpoint limits requests per source IP and caps successful tickets per account. A successful response includes the M&F ticket ID; if the M&F service is unavailable, the app continues to show the configured support email and phone numbers.
+
+```json
+{
+  "email": "owner@example.com",
+  "password": "<current-password>"
+}
+```
 
 #### `GET /email-auth/me`
 Returns the signed-in account profile and renews the active session. The app uses this route on startup to resume a saved secure session without asking for the password again.
@@ -150,7 +163,7 @@ Firebase Cloud Messaging is configured for the Android app (`com.dukaledger.duka
 The app's Stock & Inventory and Analytics screens export a multi-page landscape PDF containing the JengaBiz logo, shop summary, all stock fields, and MF Technologies contact details (`info@mftechnologies.org`, `0748329410`, `0712742991`). The file opens the platform share/print sheet.
 
 #### `POST /email-auth/logout`
-Revokes the current bearer session.
+Revokes the current bearer session. The optional `deviceToken` also removes that phone's push registration. The app clears its local session first and sends server revocation in the background so sign-out does not wait for a slow network.
 
 ---
 

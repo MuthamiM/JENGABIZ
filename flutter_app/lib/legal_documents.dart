@@ -26,12 +26,12 @@ const jengaBizTerms = LegalDocument(
       'Provide accurate account and shop details, verify your email address, and keep your password, device, and one-time codes private. You are responsible for activity on your account and for limiting access to your shop records. Contact MF Technologies promptly if you believe someone has accessed your account without permission.',
     ),
     LegalSection(
-      'Shop records and product images',
-      'You are responsible for the accuracy of product names, categories, SKUs, quantities, costs, prices, sales, and other information you enter. You keep your rights to business information and images you provide. You must have permission to use each image and must not upload unlawful content or content that violates another person’s rights. You allow JengaBiz to store, display, and transmit that content only as needed to provide the service.',
+      'Shop records and photos',
+      'You are responsible for the accuracy of product names, categories, SKUs, quantities, costs, prices, sales, and other information you enter. You keep your rights to business information and photos you provide. Some accounts may still have one profile photo uploaded before new profile photo uploads were disabled. If present, you can keep it or permanently remove it; it cannot be restored after removal. You must have permission to use each photo and must not upload unlawful content or content that violates another person’s rights. You allow JengaBiz to store and display existing profile and product photos only as needed to provide the service.',
     ),
     LegalSection(
       'Offline use and syncing',
-      'The app caches shop data and product images on your phone for faster access and supported offline work. Offline changes sync when a connection returns. Keep the app and its local data intact until pending changes have synced; clearing app data or uninstalling first may permanently remove changes that exist only on that phone.',
+      'The app caches shop data, any existing profile photo, and product images on your phone for faster access and supported offline work. Profile photos uploaded earlier remain in your account until removed; new profile photo uploads are disabled. Product images and supported stock changes sync when a connection returns. Keep the app and its local data intact until pending changes have synced; clearing app data or uninstalling first may permanently remove changes that exist only on that phone.',
     ),
     LegalSection(
       'Reports and business decisions',
@@ -43,7 +43,7 @@ const jengaBizTerms = LegalDocument(
     ),
     LegalSection(
       'Optional device features',
-      'Fingerprint or face authentication is handled by your phone’s operating system. Location, contacts, photos, and push notifications depend on device permissions and app settings. Contacts access is requested only when you choose Invite a contact in Refer & Earn. You can still copy or share your referral link if you decline. You can change permissions or preferences in Android settings; related features may then be unavailable.',
+      'Fingerprint or face authentication is handled by your phone’s operating system. Location, contacts, photos, and push notifications depend on device permissions and app settings. Android’s system photo picker shares only the product image you choose; JengaBiz does not browse the full photo or video library. Existing profile photos can be removed from Profile, but new profile photo uploads are disabled. Contacts access is requested only when you choose Invite a contact in Refer & Earn. You can still copy or share your referral link if you decline. You can change permissions or preferences in Android settings; related features may then be unavailable.',
     ),
     LegalSection(
       'Acceptable use and service changes',
@@ -69,7 +69,7 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'Information we use',
-      'Account details can include your name, shop name, email address, optional phone number, password hash, account settings, and county recorded for referral eligibility. Shop records include products, categories, SKUs or barcodes, quantities, prices, costs, sales activity, and product images. We use this information to provide the app features you request.',
+      'Account details can include your name, shop name, email address, optional phone number, password hash, account settings, and county recorded for referral eligibility. Some accounts may still contain one profile photo uploaded before profile photo uploads were disabled. You can remove it from Profile; removal is permanent and it cannot be restored. Shop records include products, categories, SKUs or barcodes, quantities, prices, costs, sales activity, and product images. We use this information to provide the app features you request.',
     ),
     LegalSection(
       'Verification and notifications',
@@ -77,11 +77,11 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'Location and device features',
-      'Location permission is optional. If allowed, the app can estimate a nearby supply hub and detect your country and county for Kenya-only referral rules. The referral service receives the detected country and county, not your GPS coordinates. Fingerprint and face checks are performed by Android; JengaBiz receives the authentication result and does not receive or store biometric templates. When you choose a product photo, Android shares only that selected photo with JengaBiz through its system media picker; the app does not browse your photo or video library. JengaBiz does not currently use videos for stock records. Contacts permission is requested only when you choose Invite a contact. The selected contact’s display name can personalize the invite; your address book is not uploaded to JengaBiz or saved by the app.',
+      'Location permission is optional. If allowed, the app can estimate a nearby supply hub and detect your country and county for Kenya-only referral rules. The referral service receives the detected country and county, not your GPS coordinates. Fingerprint and face checks are performed by Android; JengaBiz receives the authentication result and does not receive or store biometric templates. When you choose a product photo, Android shares only that selected image with JengaBiz through its system photo picker; the app does not browse your photo or video library. Existing profile photos can be removed in the app, and new profile photo uploads are disabled. JengaBiz does not currently use videos. Contacts permission is requested only when you choose Invite a contact. The selected contact’s display name can personalize the invite; your address book is not uploaded to JengaBiz or saved by the app.',
     ),
     LegalSection(
       'On-device storage and syncing',
-      'The app stores the session credential in Android secure storage and keeps settings, shop data, and image cache on the phone for faster access and supported offline work. Shop records and product images sync to your JengaBiz account when online. Changes waiting to sync may be lost if app data is cleared, the app is removed, or the phone is lost before the connection returns.',
+      'The app stores the session credential in Android secure storage and keeps settings, shop data, any existing profile photo, and product image cache on the phone for faster access and supported offline work. Profile photos uploaded earlier remain in your JengaBiz account until removed. New profile photo uploads are disabled. Product images and supported stock changes sync when online; unsynced changes may be lost if app data is cleared, the app is removed, or the phone is lost first.',
     ),
     LegalSection(
       'Service providers',

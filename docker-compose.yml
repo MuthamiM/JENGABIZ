@@ -67,11 +67,25 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-}
       - OTP_HASH_SECRET=${JENGABIZ_OTP_HASH_SECRET:-}
+      - JENGABIZ_ADMIN_EMAIL=${JENGABIZ_ADMIN_EMAIL:-}
+      - JENGABIZ_ADMIN_NAME=${JENGABIZ_ADMIN_NAME:-MF Technologies Admin}
+      - JENGABIZ_SUPPORT_NAME=${JENGABIZ_SUPPORT_NAME:-MF Technologies}
+      - JENGABIZ_SUPPORT_EMAIL=${JENGABIZ_SUPPORT_EMAIL:-${JENGABIZ_ADMIN_EMAIL:-info@mftechnologies.org}}
+      - JENGABIZ_SUPPORT_PHONE_PRIMARY=${JENGABIZ_SUPPORT_PHONE_PRIMARY:-0748329410}
+      - JENGABIZ_SUPPORT_PHONE_SECONDARY=${JENGABIZ_SUPPORT_PHONE_SECONDARY:-0712742991}
+      - MF_SUPPORT_CONTACT_URL=${MF_SUPPORT_CONTACT_URL:-http://mf-backend:4000/api/contact}
+      - JENGABIZ_ADMIN_PASSWORD_SALT=${JENGABIZ_ADMIN_PASSWORD_SALT:-}
+      - JENGABIZ_ADMIN_PASSWORD_HASH=${JENGABIZ_ADMIN_PASSWORD_HASH:-}
+      - JENGABIZ_PHONE_ENCRYPTION_KEY=${JENGABIZ_PHONE_ENCRYPTION_KEY:-}
+      - JENGABIZ_PHONE_HASH_KEY=${JENGABIZ_PHONE_HASH_KEY:-}
       - FIREBASE_SERVICE_ACCOUNT_FILE=/run/secrets/jengabiz-fcm-service-account.json
     volumes:
       - ./backend/email-otp:/app:ro
       - jengabiz_account_data:/data
       - ./deployment/secrets/jengabiz-fcm-service-account.json:/run/secrets/jengabiz-fcm-service-account.json:ro
+    networks:
+      - default
+      - mf-support
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://127.0.0.1:5081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -98,4 +112,9 @@ volumes:
   jengabiz_redis_data:
   jengabiz_db_data:
   jengabiz_account_data:
+
+networks:
+  mf-support:
+    external: true
+    name: mf_mf-network
 

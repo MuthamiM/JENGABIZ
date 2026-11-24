@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -218,7 +219,21 @@ class JengaDB {
         inventoryOwnerId = currentUser!.id;
         await prefs.setString('jengabiz_inventory_owner_id', currentUser!.id);
       }
-      await _resumeSavedSession();
+
+      // Choose the locally saved account before the first frame. The server
+      // profile and inventory refresh happen after startup so a slow network
+      // cannot hold the app on its splash screen.
+      final api = JengaApiService.instance;
+      final sessionEmail = api.sessionEmail?.trim().toLowerCase();
+      if (api.authToken != null &&
+          sessionEmail != null &&
+          sessionEmail.isNotEmpty) {
+        shouldResumeSavedSession = true;
+        final savedAccount = findUser(sessionEmail);
+        if (savedAccount != null && currentUser?.id != savedAccount.id) {
+          await _activateLocalUser(savedAccount);
+        }
+      }
     } catch (e) {
       try {
         final assetJson = await rootBundle.loadString('assets/items_db.json');
@@ -229,6 +244,26 @@ class JengaDB {
 
     await _refreshStockWidget();
     isInitialized = true;
+  }
+
+  /// Refresh an existing sign-in after the local app has already opened.
+  /// Network failures keep the saved session; only an explicit 401 revokes it.
+  Future<bool> refreshSavedSession() async {
+    if (!isInitialized) await init();
+    final api = JengaApiService.instance;
+    if (api.authToken == null ||
+        api.sessionEmail == null ||
+        api.sessionEmail!.trim().isEmpty) {
+      shouldResumeSavedSession = false;
+      return false;
+    }
+    shouldResumeSavedSession = true;
+    try {
+      await _resumeSavedSession();
+    } catch (_) {
+      // Keep the local profile and token when the server cannot be reached.
+    }
+    return shouldResumeSavedSession;
   }
 
   Future<bool> saveItems() async {
@@ -416,6 +451,7 @@ class JengaDB {
     final api = JengaApiService.instance;
     final email = api.sessionEmail?.trim().toLowerCase();
     if (api.authToken == null || email == null || email.isEmpty) return;
+    shouldResumeSavedSession = true;
 
     final cachedUser = findUser(email);
     if (cachedUser != null) {
@@ -427,13 +463,14 @@ class JengaDB {
       final profile = Map<String, dynamic>.from(response!.data['user'] as Map);
       currentUser = await persistAuthenticatedAccount(profile: profile);
       shouldResumeSavedSession = true;
-      await syncStockWithServer();
+      unawaited(syncStockWithServer().catchError((_) => false));
       return;
     }
 
     if (response?.statusCode == 401) {
       await api.clearSession();
       currentUser = null;
+      shouldResumeSavedSession = false;
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('current_user_id');
       return;
@@ -736,12 +773,18 @@ class JengaDB {
   }
 
   Future<void> logout() async {
-    await FirebasePushService.instance.removeCurrentDevice();
-    await JengaApiService.instance.logoutAccount();
     currentUser = null;
     shouldResumeSavedSession = false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('current_user_id');
+    final deviceToken = FirebasePushService.instance.currentToken;
+    final apiLogout =
+        JengaApiService.instance.logoutAccount(deviceToken: deviceToken);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_user_id');
+    } catch (_) {
+      // The in-memory account and secure API session are already cleared.
+    }
+    await apiLogout;
   }
 
   Future<void> clearRejectedSession() async {

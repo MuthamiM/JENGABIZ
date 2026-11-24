@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#1e6bff" />
+    <title>Admin dashboard · JengaBiz</title>
+    <link rel="icon" href="/assets/jengabiz_mark.png" />
+    <link rel="stylesheet" href="/admin/admin.css" />
+    <script src="/admin/admin.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="/" aria-label="JengaBiz home">
+          <img src="/assets/jengabiz_mark.png" alt="" />
+          <span>JengaBiz <small>ADMIN</small></span>
+        </a>
+
+        <div class="workspace-label">WORKSPACE</div>
+        <nav class="nav-list" aria-label="Admin sections">
+          <button class="nav-item active" data-page="overview" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg></span><span>Overview</span>
+          </button>
+          <button class="nav-item" data-page="users" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM20 8v6M23 11h-6"/></svg></span><span>User accounts</span>
+          </button>
+          <button class="nav-item" data-page="inventory" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 9h16M9 9v11M15 9v11M4 14h16"/></svg></span><span>Inventory</span>
+          </button>
+          <button class="nav-item" data-page="referrals" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9M5 12v7h7"/></svg></span><span>Referrals</span>
+          </button>
+          <button class="nav-item" data-page="exports" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 17v4h16v-4"/></svg></span><span>Data exports</span>
+          </button>
+          <button class="nav-item" data-page="admins" type="button">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4"/></svg></span><span>Admin access</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="secure-note"><span class="secure-dot"></span>Private admin access</div>
+          <div class="user-block">
+            <div class="avatar" id="user-avatar">J</div>
+            <div class="user-copy"><strong id="user-name">JengaBiz Admin</strong><span id="user-email">Signed in</span></div>
+            <button class="icon-button logout-button" id="logout-button" type="button" aria-label="Sign out" title="Sign out">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" /></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Open navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <div class="breadcrumb"><span>Admin</span><b>/</b><strong id="breadcrumb-current">Overview</strong></div>
+          <div class="topbar-actions">
+            <span class="live-indicator"><i></i> Live data</span>
+            <button class="refresh-button" id="refresh-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4" /></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="content" id="page-content" aria-live="polite">
+          <div class="loading-state"><span class="spinner"></span><span>Loading JengaBiz data…</span></div>
+        </section>
+        <footer class="page-footer">JengaBiz admin · Live account and inventory records</footer>
+      </main>
+    </div>
+
+    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <section class="auth-screen" id="auth-screen" aria-labelledby="auth-title" hidden>
+      <div class="auth-card">
+        <a class="auth-brand" href="/">
+          <img src="/assets/jengabiz_mark.png" alt="" />
+          <span>JengaBiz <small>ADMIN</small></span>
+        </a>
+        <div class="auth-lock" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
+        </div>
+        <p class="eyebrow">ADMINISTRATOR ACCESS</p>
+        <h1 id="auth-title">Admin sign in</h1>
+        <p class="auth-description">Sign in with your administrator credentials.</p>
+        <form id="login-form" autocomplete="on">
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="username" required maxlength="254" value="info@mftechnologies.org" />
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="1024" placeholder="Your JengaBiz password" />
+          <p class="auth-error" id="auth-error" role="alert" hidden></p>
+          <button class="primary-button auth-submit" id="login-button" type="submit">Sign in securely <span aria-hidden="true">→</span></button>
+        </form>
+      </div>
+    </section>
+  </body>
+</html>

@@ -37,6 +37,7 @@ class _UpdateScreenState extends State<UpdateScreen>
   bool _checking = true;
   bool _canInstall = false;
   bool _installing = false;
+  bool _showAllReleaseNotes = false;
 
   bool get _isDownloading => _downloadProgress != null;
 
@@ -97,6 +98,7 @@ class _UpdateScreenState extends State<UpdateScreen>
             : null;
         _canInstall = canInstall;
         _checking = false;
+        _showAllReleaseNotes = false;
       });
     } on Object {
       if (!mounted) return;
@@ -297,7 +299,29 @@ class _UpdateScreenState extends State<UpdateScreen>
                       ),
                     ),
                     const SizedBox(height: 9),
-                    ...release.releaseNotes.map(_noteRow),
+                    ...(_showAllReleaseNotes || release.releaseNotes.length <= 3
+                            ? release.releaseNotes
+                            : release.releaseNotes.take(3))
+                        .map(_noteRow),
+                    if (release.releaseNotes.length > 3)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () => setState(() =>
+                              _showAllReleaseNotes = !_showAllReleaseNotes),
+                          style: TextButton.styleFrom(
+                            foregroundColor: _updateBlue,
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: Text(
+                            _showAllReleaseNotes ? 'Less' : 'More…',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                   if (_isDownloading) ...[
                     const SizedBox(height: 18),

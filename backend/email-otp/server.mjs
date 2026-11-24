@@ -20,6 +20,43 @@ const MAX_STOCK_IMAGE_BODY_BYTES = 1400 * 1024;
 const MAX_STOCK_IMAGE_BYTES = 1024 * 1024;
 const MAX_LOGIN_FAILURES = 10;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const SUPPORT_REQUEST_WINDOW_MS = 15 * 60 * 1000;
+const MAX_SUPPORT_REQUESTS_PER_IP = 10;
+const SUPPORT_TICKET_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_SUPPORT_TICKETS_PER_ACCOUNT = 3;
+const ADMIN_READ_PATHS = new Set([
+  '/email-auth/admin/overview',
+  '/email-auth/admin/users',
+  '/email-auth/admin/inventory',
+  '/email-auth/admin/referrals',
+  '/email-auth/admin/admins',
+  '/email-auth/admin/export',
+]);
+const ADMIN_LOGIN_PATH = '/email-auth/admin/login';
+const ADMIN_ME_PATH = '/email-auth/admin/me';
+const ADMIN_LOGOUT_PATH = '/email-auth/admin/logout';
+
+function isAdminRoute(path) {
+  return ADMIN_READ_PATHS.has(path) || path === ADMIN_ME_PATH || path === ADMIN_LOGOUT_PATH ||
+    /^\/email-auth\/admin\/users\/[A-Za-z0-9_-]{1,128}(?:\/status)?$/.test(path);
+}
+
+function toCsv(rows) {
+  const records = Array.isArray(rows) ? rows : [];
+  const columns = [...new Set(records.flatMap((record) => Object.keys(record)))];
+  if (!columns.length) return '';
+  const encode = (value) => {
+    let text = value === null || value === undefined
+      ? ''
+      : typeof value === 'object'
+        ? JSON.stringify(value)
+        : String(value);
+    if (/^[\s]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  return [columns.map(encode).join(','), ...records.map((record) => columns.map((key) => encode(record[key])).join(','))]
+    .join('\r\n');
+}
 
 function json(response, status, payload) {
   response.writeHead(status, {
@@ -98,18 +135,48 @@ export function createEmailOtpHandler({
   sendPush = sendFirebasePush,
   now = Date.now,
   makeOtp = () => String(randomInt(100000, 1000000)),
+  adminEmail = process.env.JENGABIZ_ADMIN_EMAIL || '',
+  adminName = process.env.JENGABIZ_ADMIN_NAME || 'MF Technologies Admin',
+  supportName = process.env.JENGABIZ_SUPPORT_NAME || 'MF Technologies',
+  supportEmail = process.env.JENGABIZ_SUPPORT_EMAIL || adminEmail || 'info@mftechnologies.org',
+  supportPhonePrimary = process.env.JENGABIZ_SUPPORT_PHONE_PRIMARY || '0748329410',
+  supportPhoneSecondary = process.env.JENGABIZ_SUPPORT_PHONE_SECONDARY || '0712742991',
+  mfSupportContactUrl = process.env.MF_SUPPORT_CONTACT_URL || 'http://mf-backend:4000/api/contact',
+  adminPasswordSalt = process.env.JENGABIZ_ADMIN_PASSWORD_SALT || '',
+  adminPasswordHash = process.env.JENGABIZ_ADMIN_PASSWORD_HASH || '',
+  phoneEncryptionKey = process.env.JENGABIZ_PHONE_ENCRYPTION_KEY,
+  phoneHashKey = process.env.JENGABIZ_PHONE_HASH_KEY,
   database = new DatabaseSync(':memory:'),
 } = {}) {
-  const accounts = createAccountStore(database, { now });
+  const accounts = createAccountStore(database, {
+    now,
+    adminEmail,
+    adminName,
+    adminPasswordSalt,
+    adminPasswordHash,
+    phoneEncryptionKey,
+    phoneHashKey,
+  });
   const challenges = new Map();
   const sendsByIp = new Map();
   const loginFailures = new Map();
+  const supportRequestsByIp = new Map();
+  const supportTicketsByAccount = new Map();
   const verificationGrants = new Map();
   const digestOtp = (email, otp) =>
     createHash('sha256')
       .update(`${hashSecret}\0${email}\0${otp}`)
       .digest('hex');
   const digestGrant = (token) => createHash('sha256').update(token).digest('hex');
+
+  function suspensionSupport() {
+    return {
+      name: supportName,
+      adminName,
+      email: supportEmail,
+      phoneNumbers: [supportPhonePrimary, supportPhoneSecondary].filter(Boolean),
+    };
+  }
 
   function issueVerificationGrant(email) {
     const currentTime = now();
@@ -156,6 +223,9 @@ export function createEmailOtpHandler({
     try {
       const path = new URL(request.url || '/', 'http://localhost').pathname;
       const stockImageMatch = path.match(/^\/email-auth\/stock\/images\/([A-Za-z0-9_-]{1,128})$/);
+      const profileImageMatch = path === '/email-auth/profile/image';
+      const adminUserMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})$/);
+      const adminStatusMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})\/status$/);
       if (request.method === 'GET' && path === '/health') {
         return json(response, 200, { status: 'ok' });
       }
@@ -165,6 +235,7 @@ export function createEmailOtpHandler({
         '/email-auth/verify-otp',
         '/email-auth/reset-password',
       ];
+      const supportRequestPath = '/email-auth/support/request';
       const accountPaths = [
         '/email-auth/register',
         '/email-auth/migrate',
@@ -172,14 +243,24 @@ export function createEmailOtpHandler({
         '/email-auth/me',
         '/email-auth/logout',
         '/email-auth/stock/items',
+        '/email-auth/profile/image',
         '/email-auth/notifications/device',
         '/email-auth/referrals',
         '/email-auth/referrals/location',
+        ADMIN_LOGIN_PATH,
       ];
-      const isAccountPath = accountPaths.includes(path) || stockImageMatch !== null;
-      const allowed = otpPaths.includes(path) || isAccountPath;
-      const allowedMethod = stockImageMatch
-        ? ['GET', 'PUT'].includes(request.method)
+      const isAccountPath = accountPaths.includes(path) || isAdminRoute(path) || stockImageMatch !== null;
+      const allowed = otpPaths.includes(path) || path === supportRequestPath || isAccountPath;
+      const allowedMethod = stockImageMatch || profileImageMatch
+        ? (stockImageMatch
+          ? ['GET', 'PUT'].includes(request.method)
+          : ['GET', 'DELETE'].includes(request.method))
+        : path === ADMIN_LOGIN_PATH || path === ADMIN_LOGOUT_PATH
+          ? request.method === 'POST'
+        : adminStatusMatch
+          ? request.method === 'PATCH'
+        : isAdminRoute(path)
+          ? request.method === 'GET'
         : path === '/email-auth/stock/items'
         ? ['GET', 'PUT'].includes(request.method)
         : path === '/email-auth/notifications/device'
@@ -219,6 +300,33 @@ export function createEmailOtpHandler({
           ? authorization.slice(7).trim()
           : '';
 
+        if (path === ADMIN_LOGIN_PATH) {
+          const email = normalizeEmail(payload?.email);
+          const password = typeof payload?.password === 'string' ? payload.password : '';
+          if (!email || password.length < 8 || Buffer.byteLength(password) > 1024) {
+            return json(response, 400, { success: false, message: 'Enter a valid administrator email and password.' });
+          }
+          const key = `admin\0${requestIp(request)}\0${email}`;
+          const currentTime = now();
+          for (const [attemptKey, attempts] of loginFailures) {
+            if (attempts.windowStartedAt + LOGIN_WINDOW_MS <= currentTime) loginFailures.delete(attemptKey);
+          }
+          const failure = loginFailures.get(key);
+          if (failure && failure.count >= MAX_LOGIN_FAILURES) {
+            return json(response, 429, { success: false, message: 'Too many sign-in attempts. Try again later.' });
+          }
+          const result = accounts.adminLogin(email, password);
+          if (!result) {
+            loginFailures.set(key, {
+              windowStartedAt: failure?.windowStartedAt ?? currentTime,
+              count: failure ? failure.count + 1 : 1,
+            });
+            return json(response, 401, { success: false, message: 'Administrator email or password is incorrect.' });
+          }
+          loginFailures.delete(key);
+          return json(response, 200, { success: true, ...result });
+        }
+
         if (path === '/email-auth/login') {
           const email = normalizeEmail(payload?.email);
           const password = typeof payload?.password === 'string' ? payload.password : '';
@@ -240,6 +348,15 @@ export function createEmailOtpHandler({
             return json(response, 429, { success: false, message: 'Too many sign-in attempts. Try again later.' });
           }
           const result = accounts.login(email, password);
+          if (result?.suspended) {
+            loginFailures.delete(key);
+            return json(response, 403, {
+              success: false,
+              code: 'ACCOUNT_SUSPENDED',
+              message: 'This account is suspended. Contact MF Technologies support.',
+              support: suspensionSupport(),
+            });
+          }
           if (!result) {
             loginFailures.set(key, {
               windowStartedAt: failure && failure.windowStartedAt + LOGIN_WINDOW_MS > currentTime
@@ -288,9 +405,105 @@ export function createEmailOtpHandler({
           });
         }
 
+        if (isAdminRoute(path)) {
+          const adminSession = accounts.authenticateAdmin(bearer);
+          if (!adminSession) {
+            return json(response, 401, { success: false, message: 'Administrator sign-in is required.' });
+          }
+          if (path === ADMIN_ME_PATH) {
+            return json(response, 200, { success: true, admin: adminSession.user });
+          }
+          if (path === ADMIN_LOGOUT_PATH) {
+            accounts.revokeAdminSession(adminSession.tokenHash);
+            return json(response, 200, { success: true });
+          }
+          if (path === '/email-auth/admin/overview') {
+            return json(response, 200, { success: true, ...accounts.adminOverview({ nowMs: now() }) });
+          }
+          if (path === '/email-auth/admin/users') {
+            const url = new URL(request.url || '/', 'http://localhost');
+            const result = accounts.adminUsers(url.searchParams.get('q') || '', {
+              status: url.searchParams.get('status') || 'all',
+              limit: url.searchParams.get('limit') || 60,
+              offset: url.searchParams.get('offset') || 0,
+            });
+            return json(response, 200, { success: true, ...result });
+          }
+          if (adminStatusMatch) {
+            const status = typeof payload?.status === 'string' ? payload.status : '';
+            if (!['active', 'suspended'].includes(status)) {
+              return json(response, 400, { success: false, message: 'Choose active or suspended status.' });
+            }
+            const updated = accounts.setCustomerStatus(adminStatusMatch[1], status);
+            if (!updated) return json(response, 404, { success: false, message: 'Customer account was not found.' });
+            return json(response, 200, { success: true, status });
+          }
+          if (adminUserMatch) {
+            const details = accounts.adminUserDetails(adminUserMatch[1]);
+            return details
+              ? json(response, 200, { success: true, ...details })
+              : json(response, 404, { success: false, message: 'Customer account was not found.' });
+          }
+          if (path === '/email-auth/admin/inventory') {
+            const url = new URL(request.url || '/', 'http://localhost');
+            const result = accounts.adminInventory(url.searchParams.get('q') || '', {
+              limit: url.searchParams.get('limit') || 25,
+              offset: url.searchParams.get('offset') || 0,
+            });
+            return json(response, 200, {
+              success: true,
+              ...result,
+            });
+          }
+          if (path === '/email-auth/admin/referrals') {
+            const url = new URL(request.url || '/', 'http://localhost');
+            const result = accounts.adminReferrals(url.searchParams.get('q') || '', {
+              limit: url.searchParams.get('limit') || 25,
+              offset: url.searchParams.get('offset') || 0,
+            });
+            return json(response, 200, {
+              success: true,
+              ...result,
+            });
+          }
+          if (path === '/email-auth/admin/admins') {
+            return json(response, 200, { success: true, admins: accounts.listAdminAccounts() });
+          }
+          if (path === '/email-auth/admin/export') {
+            const url = new URL(request.url || '/', 'http://localhost');
+            const dataset = url.searchParams.get('dataset') || 'all';
+            const format = url.searchParams.get('format') || 'json';
+            if (!['csv', 'json'].includes(format)) {
+              return json(response, 400, { success: false, message: 'Export format must be CSV or JSON.' });
+            }
+            const data = accounts.adminExportData(dataset);
+            if (!data) return json(response, 400, { success: false, message: 'Choose users, inventory, referrals, or all data.' });
+            if (format === 'csv' && !Array.isArray(data)) {
+              return json(response, 400, { success: false, message: 'CSV exports require one dataset at a time.' });
+            }
+            const body = format === 'csv' ? toCsv(data) : JSON.stringify(data, null, 2);
+            const filename = `jengabiz-${dataset}-${new Date(now()).toISOString().slice(0, 10)}.${format}`;
+            response.writeHead(200, {
+              'content-type': format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8',
+              'content-disposition': `attachment; filename="${filename}"`,
+              'cache-control': 'private, no-store',
+              'x-content-type-options': 'nosniff',
+              'referrer-policy': 'no-referrer',
+            });
+            response.end(body);
+            return;
+          }
+        }
+
         if (path === '/email-auth/logout') {
           const session = accounts.authenticate(bearer);
           if (!session) return json(response, 401, { success: false, message: 'Sign in again to continue.' });
+          const deviceToken = typeof payload?.deviceToken === 'string'
+            ? payload.deviceToken.trim()
+            : '';
+          if (deviceToken.length > 0 && deviceToken.length <= 4096) {
+            accounts.removeNotificationDevice(session.id, deviceToken);
+          }
           accounts.revokeSession(session.tokenHash);
           return json(response, 200, { success: true });
         }
@@ -383,6 +596,26 @@ export function createEmailOtpHandler({
             imageUrl: `stock-image:${itemId}`,
           });
         }
+        if (profileImageMatch) {
+          if (request.method === 'GET') {
+            const storedImage = accounts.getProfileImage(session.id);
+            if (!storedImage) {
+              return json(response, 404, { success: false, message: 'Profile photo was not found.' });
+            }
+            const imageData = Buffer.from(storedImage.imageData);
+            response.writeHead(200, {
+              'content-type': storedImage.mimeType,
+              'content-length': imageData.length,
+              'x-profile-image-type': storedImage.imageType,
+              'cache-control': 'private, no-store',
+              'x-content-type-options': 'nosniff',
+            });
+            response.end(imageData);
+            return;
+          }
+          const removed = accounts.removeProfileImage(session.id);
+          return json(response, 200, { success: true, removed: removed > 0 });
+        }
         if (request.method === 'GET') {
           return json(response, 200, { success: true, items: accounts.listStock(session.id) });
         }
@@ -448,13 +681,42 @@ export function createEmailOtpHandler({
       }
 
       if (path === '/email-auth/request-otp') {
-        const existing = challenges.get(email);
+        const purpose = typeof payload?.purpose === 'string'
+          ? payload.purpose
+          : 'account_verification';
+        if (!['account_verification', 'password_reset'].includes(purpose)) {
+          return json(response, 400, {
+            success: false,
+            message: 'Choose account verification or password reset.',
+          });
+        }
         const currentTime = now();
         for (const [key, record] of challenges) {
           if (record.expiresAt <= currentTime) challenges.delete(key);
         }
         for (const [key, record] of sendsByIp) {
           if (record.windowStartedAt <= currentTime - 60 * 60 * 1000) sendsByIp.delete(key);
+        }
+        const existing = challenges.get(email);
+        const sourceIp = requestIp(request);
+        const ipRecord = sendsByIp.get(sourceIp);
+        if (ipRecord && ipRecord.windowStartedAt > currentTime - 60 * 60 * 1000 && ipRecord.sendCount >= MAX_SENDS_PER_IP_PER_HOUR) {
+          return json(response, 429, { success: false, message: 'Too many codes requested. Try again later.' });
+        }
+        if (accounts.isAccountSuspended(email)) {
+          const sameIpWindow = ipRecord && ipRecord.windowStartedAt > currentTime - 60 * 60 * 1000;
+          sendsByIp.set(sourceIp, {
+            windowStartedAt: sameIpWindow ? ipRecord.windowStartedAt : currentTime,
+            sendCount: sameIpWindow ? ipRecord.sendCount + 1 : 1,
+          });
+          return json(response, 403, {
+            success: false,
+            code: 'ACCOUNT_SUSPENDED',
+            message: purpose === 'password_reset'
+              ? 'Password reset is unavailable for this suspended account. Contact MF Technologies support.'
+              : 'Verification codes are unavailable for this suspended account. Contact MF Technologies support.',
+            support: suspensionSupport(),
+          });
         }
         if (challenges.size >= 10000 && !challenges.has(email)) {
           return json(response, 429, { success: false, message: 'Too many codes requested. Try again later.' });
@@ -466,11 +728,6 @@ export function createEmailOtpHandler({
           return json(response, 429, { success: false, message: 'Too many codes requested. Try again later.' });
         }
 
-        const sourceIp = requestIp(request);
-        const ipRecord = sendsByIp.get(sourceIp);
-        if (ipRecord && ipRecord.windowStartedAt > currentTime - 60 * 60 * 1000 && ipRecord.sendCount >= MAX_SENDS_PER_IP_PER_HOUR) {
-          return json(response, 429, { success: false, message: 'Too many codes requested. Try again later.' });
-        }
         if (!apiKey || !fromEmail) {
           return json(response, 503, { success: false, message: 'Email verification is temporarily unavailable.' });
         }
@@ -506,6 +763,14 @@ export function createEmailOtpHandler({
       }
 
       if (path === '/email-auth/reset-password') {
+        if (accounts.isAccountSuspended(email)) {
+          return json(response, 403, {
+            success: false,
+            code: 'ACCOUNT_SUSPENDED',
+            message: 'Password reset is unavailable for this suspended account. Contact MF Technologies support.',
+            support: suspensionSupport(),
+          });
+        }
         const verificationToken = typeof payload?.verificationToken === 'string'
           ? payload.verificationToken
           : '';
@@ -538,6 +803,122 @@ export function createEmailOtpHandler({
         return json(response, 200, {
           success: true,
           message: 'Password changed. Sign in with your new password.',
+        });
+      }
+
+      if (path === supportRequestPath) {
+        const password = typeof payload?.password === 'string' ? payload.password : '';
+        if (password.length < 8 || Buffer.byteLength(password) > 1024) {
+          return json(response, 400, {
+            success: false,
+            message: 'Sign in with your current password before requesting a review.',
+          });
+        }
+
+        const currentTime = now();
+        for (const [key, record] of supportRequestsByIp) {
+          if (record.windowStartedAt + SUPPORT_REQUEST_WINDOW_MS <= currentTime) {
+            supportRequestsByIp.delete(key);
+          }
+        }
+        for (const [key, record] of supportTicketsByAccount) {
+          if (record.windowStartedAt + SUPPORT_TICKET_WINDOW_MS <= currentTime) {
+            supportTicketsByAccount.delete(key);
+          }
+        }
+        const sourceIp = requestIp(request);
+        const ipRecord = supportRequestsByIp.get(sourceIp);
+        if (ipRecord && ipRecord.windowStartedAt + SUPPORT_REQUEST_WINDOW_MS > currentTime &&
+            ipRecord.requestCount >= MAX_SUPPORT_REQUESTS_PER_IP) {
+          return json(response, 429, {
+            success: false,
+            message: 'Too many support attempts. Try again later or use the contact details below.',
+            support: suspensionSupport(),
+          });
+        }
+        if (!ipRecord && supportRequestsByIp.size >= 10000) {
+          supportRequestsByIp.delete(supportRequestsByIp.keys().next().value);
+        }
+        supportRequestsByIp.set(sourceIp, {
+          windowStartedAt: ipRecord && ipRecord.windowStartedAt + SUPPORT_REQUEST_WINDOW_MS > currentTime
+            ? ipRecord.windowStartedAt
+            : currentTime,
+          requestCount: ipRecord && ipRecord.windowStartedAt + SUPPORT_REQUEST_WINDOW_MS > currentTime
+            ? ipRecord.requestCount + 1
+            : 1,
+        });
+
+        const account = accounts.getSuspendedAccountForSupport(email, password);
+        if (!account) {
+          return json(response, 403, {
+            success: false,
+            message: 'Could not verify a suspended account with those credentials. Sign in again and retry.',
+          });
+        }
+
+        const accountLimit = supportTicketsByAccount.get(account.id);
+        if (accountLimit && accountLimit.windowStartedAt + SUPPORT_TICKET_WINDOW_MS > currentTime &&
+            accountLimit.ticketCount >= MAX_SUPPORT_TICKETS_PER_ACCOUNT) {
+          return json(response, 429, {
+            success: false,
+            message: 'A review request was already sent for this account. Contact MF Technologies directly if you need further help.',
+            support: suspensionSupport(),
+          });
+        }
+
+        let mfResponse;
+        let mfPayload;
+        try {
+          mfResponse = await fetch(mfSupportContactUrl, {
+            method: 'POST',
+            headers: {
+              accept: 'application/json',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: account.name.slice(0, 100),
+              email: account.email,
+              phone: account.phone ? account.phone.slice(0, 30) : undefined,
+              company: 'JengaBiz account support',
+              message: [
+                'JengaBiz suspended-account review request.',
+                `Account ID: ${account.id}`,
+                `Shop: ${account.shopName}`,
+                'The account holder requested a review and can be contacted using the account details above.',
+              ].join('\n'),
+            }),
+            signal: AbortSignal.timeout(8000),
+          });
+          mfPayload = await mfResponse.json();
+        } catch {
+          return json(response, 503, {
+            success: false,
+            message: 'MF Technologies support could not be reached right now. Use the email or phone options below.',
+            support: suspensionSupport(),
+          });
+        }
+
+        const ticketId = mfPayload?.data?.id;
+        if (!mfResponse.ok || mfPayload?.success !== true || typeof ticketId !== 'string' || !ticketId) {
+          return json(response, 503, {
+            success: false,
+            message: 'MF Technologies support could not accept the request right now. Use the email or phone options below.',
+            support: suspensionSupport(),
+          });
+        }
+
+        supportTicketsByAccount.set(account.id, {
+          windowStartedAt: accountLimit && accountLimit.windowStartedAt + SUPPORT_TICKET_WINDOW_MS > currentTime
+            ? accountLimit.windowStartedAt
+            : currentTime,
+          ticketCount: accountLimit && accountLimit.windowStartedAt + SUPPORT_TICKET_WINDOW_MS > currentTime
+            ? accountLimit.ticketCount + 1
+            : 1,
+        });
+        return json(response, 201, {
+          success: true,
+          ticketId,
+          message: 'Your review request was sent to MF Technologies.',
         });
       }
 

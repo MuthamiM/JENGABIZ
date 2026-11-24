@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -19,6 +21,7 @@ import 'services/db_service.dart';
 import 'services/firebase_push_service.dart';
 import 'services/inventory_pdf_export_service.dart';
 import 'services/location_biometric_service.dart';
+import 'services/profile_image_cache_service.dart';
 import 'services/stock_notification_service.dart';
 
 const kBlue = Color(0xFF1E6BFF);
@@ -161,35 +164,52 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   Future<void> _initializeApp() async {
     try {
       await JengaDB.instance.init();
-      if (JengaApiService.instance.authToken != null) {
-        unawaited(_initializePushNotifications());
-      }
     } catch (_) {}
 
-    final hasExistingAccount = JengaDB.instance.shouldResumeSavedSession ||
+    final api = JengaApiService.instance;
+    final hasPersistedSession =
+        api.authToken != null && (api.sessionEmail?.trim().isNotEmpty ?? false);
+    final hasExistingAccount = hasPersistedSession ||
+        JengaDB.instance.shouldResumeSavedSession ||
         JengaDB.instance.currentUser != null ||
         JengaDB.instance.users.isNotEmpty;
     var welcomeSeen = hasExistingAccount;
     try {
       final preferences = await SharedPreferences.getInstance();
       final savedWelcomeSeen = preferences.getBool(_welcomeSeenKey);
-      if (savedWelcomeSeen != null) {
-        welcomeSeen = savedWelcomeSeen;
-      } else if (hasExistingAccount) {
+      welcomeSeen = hasExistingAccount || (savedWelcomeSeen ?? false);
+      if (welcomeSeen && savedWelcomeSeen != true) {
         await preferences.setBool(_welcomeSeenKey, true);
       }
     } catch (_) {}
 
-    _hasSeenWelcome = welcomeSeen;
-    final initialScreen = JengaDB.instance.shouldResumeSavedSession
-        ? AppScreen.home
-        : welcomeSeen
-            ? AppScreen.auth
-            : AppScreen.welcome;
+    final initialScreen =
+        hasPersistedSession || JengaDB.instance.shouldResumeSavedSession
+            ? AppScreen.home
+            : welcomeSeen
+                ? AppScreen.auth
+                : AppScreen.welcome;
+    _hasSeenWelcome = welcomeSeen || initialScreen == AppScreen.welcome;
+    if (initialScreen == AppScreen.welcome) {
+      // This is a one-time introduction. Mark it when it is shown, even if
+      // the app is closed before the user taps through to sign-in.
+      await _markWelcomeSeen();
+    }
     if (!mounted) return;
     _screenBeforeUpdate = initialScreen;
     setState(() => screen = initialScreen);
+    if (hasPersistedSession || JengaDB.instance.shouldResumeSavedSession) {
+      unawaited(_refreshRestoredSession());
+      unawaited(_initializePushNotifications());
+    }
     unawaited(_loadAvailableUpdate());
+  }
+
+  Future<void> _refreshRestoredSession() async {
+    final stillSignedIn = await JengaDB.instance.refreshSavedSession();
+    if (!stillSignedIn && mounted && screen == AppScreen.home) {
+      go(AppScreen.auth);
+    }
   }
 
   static const _welcomeSeenKey = 'jengabiz_welcome_seen_v1';
@@ -344,9 +364,10 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
             unread: unread,
             onCheckForUpdates: _openAppUpdates,
             onSignInAgain: _handleRejectedSession,
-            onLogout: () async {
-              await JengaDB.instance.logout();
+            onLogout: () {
+              final logout = JengaDB.instance.logout();
               if (mounted) go(AppScreen.auth);
+              unawaited(logout.catchError((_) {}));
             });
       case AppScreen.update:
         return UpdateScreen(
@@ -658,13 +679,13 @@ class AppSplashScreen extends StatelessWidget {
             height: 54,
             fit: BoxFit.contain,
           ),
-          SizedBox(height: 22),
-          SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: kBlue,
+          SizedBox(height: 12),
+          Text(
+            'JengaBiz',
+            style: TextStyle(
+              color: kInk,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -1037,7 +1058,7 @@ class HomeScreen extends StatelessWidget {
                                       fontWeight: FontWeight.w800)))),
                       const SizedBox(width: 6),
                       Pill('$totalUnitsSold sold',
-                          bg: Color(0x33FFFFFF), fg: Colors.white),
+                          bg: const Color(0x33FFFFFF), fg: Colors.white),
                     ]),
                     const SizedBox(height: 4),
                     Text('from ${items.length} products',
@@ -1684,6 +1705,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _preferencesLoaded = false;
   Map<String, dynamic>? _referralSummary;
   String? _referralError;
+  File? _profileImageFile;
+  String? _profileImageType;
+  bool _profileImageBusy = false;
+
+  String get _profileImageOwnerId => (JengaDB.instance.currentUser?.id ??
+          JengaApiService.instance.sessionEmail ??
+          'account')
+      .trim()
+      .toLowerCase();
+
+  String get _referralCacheKey {
+    final owner = (JengaDB.instance.currentUser?.id ??
+            JengaApiService.instance.sessionEmail ??
+            'account')
+        .trim()
+        .toLowerCase();
+    return 'jengabiz_referral_summary_${Uri.encodeComponent(owner)}';
+  }
 
   final prefs = <String, bool>{
     'Biometric login': true,
@@ -1708,11 +1747,149 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadPreferences();
+    unawaited(_loadProfileImage());
   }
 
   @override
   void dispose() {
     super.dispose();
+  }
+
+  Future<void> _loadProfileImage() async {
+    final ownerId = _profileImageOwnerId;
+    final cache = ProfileImageCacheService.instance;
+    var saved = await cache.read(ownerId);
+    if (saved?.pendingUpload == true) {
+      await cache.remove(ownerId);
+      saved = null;
+    }
+    if (!mounted) return;
+    final cachedImage = saved;
+    if (cachedImage != null) {
+      setState(() {
+        _profileImageFile = cachedImage.file;
+        _profileImageType = cachedImage.imageType;
+      });
+    }
+    if (JengaApiService.instance.authToken == null) return;
+    final remote = await JengaApiService.instance.fetchProfileImage();
+    if (!mounted || remote == null) return;
+    try {
+      final entry = await cache.save(
+        ownerId,
+        bytes: remote.bytes,
+        imageType: remote.imageType,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profileImageFile = entry.file;
+        _profileImageType = entry.imageType;
+      });
+    } catch (_) {
+      // Keep showing the existing local photo if the cache cannot be updated.
+    }
+  }
+
+  Future<void> _removeProfileImage() async {
+    if (_profileImageBusy || _profileImageFile == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Remove profile photo?'),
+            content: const Text(
+              'This deletes the photo from your account. Photo uploads are disabled, so it cannot be restored or replaced.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Keep photo'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Remove photo'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!mounted || !confirmed) return;
+
+    setState(() => _profileImageBusy = true);
+    try {
+      final removed = await JengaApiService.instance.removeProfileImage();
+      if (!mounted) return;
+      if (!removed) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Could not reach your account. The photo was kept.'),
+          ),
+        );
+        return;
+      }
+      await ProfileImageCacheService.instance.remove(_profileImageOwnerId);
+      if (!mounted) return;
+      setState(() {
+        _profileImageFile = null;
+        _profileImageType = null;
+      });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Profile photo removed permanently.')),
+      );
+    } finally {
+      if (mounted) setState(() => _profileImageBusy = false);
+    }
+  }
+
+  Widget _profilePhoto() {
+    final imageFile = _profileImageFile;
+    final canRemovePhoto = imageFile != null && !_profileImageBusy;
+    return SizedBox(
+      width: 84,
+      height: 84,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: kTintBlue,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [BoxShadow(color: kShadow, blurRadius: 12)],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: imageFile != null
+                ? Image.file(imageFile, fit: BoxFit.cover)
+                : const Avatar(size: 84),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Tooltip(
+              message: imageFile == null
+                  ? 'Profile photo upload disabled'
+                  : 'Remove existing profile photo',
+              child: IconButton(
+                onPressed: canRemovePhoto ? _removeProfileImage : null,
+                icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: canRemovePhoto ? kBlue : kMuted,
+                  disabledForegroundColor: kMuted,
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  shape: const CircleBorder(),
+                  side: const BorderSide(color: kTintBlue),
+                  fixedSize: const Size(32, 32),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _toggleReferral() {
@@ -1727,6 +1904,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _referralLoading = true;
       _referralError = null;
     });
+    if (_referralSummary == null) await _restoreReferralSummary();
+    if (!mounted) return;
     JengaApiResponse? response;
     try {
       response = await (widget.referralSummaryLoader?.call() ??
@@ -1739,7 +1918,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _referralLoading = false;
         _referralNeedsSignIn = response?.statusCode == 401;
-        if (_referralNeedsSignIn) _referralSummary = null;
         _referralError = _referralLoadError(response);
       });
       return;
@@ -1750,17 +1928,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _referralNeedsSignIn = false;
       _referralSummary = summary;
     });
+    unawaited(_saveReferralSummary(summary));
     if (summary['hasLocation'] != true) {
       await _detectAndSaveReferralLocation();
     }
   }
 
+  Future<void> _restoreReferralSummary() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final encoded = preferences.getString(_referralCacheKey);
+      if (encoded == null) return;
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map || !mounted) return;
+      setState(() => _referralSummary = Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      // A cache read failure should not block a fresh server request.
+    }
+  }
+
+  Future<void> _saveReferralSummary(Map<String, dynamic> summary) async {
+    try {
+      const savedFields = {
+        'totalPoints',
+        'referralCode',
+        'referralCount',
+        'sameCountyCount',
+        'differentCountyCount',
+        'country',
+        'county',
+        'hasLocation',
+      };
+      final cachedSummary = <String, dynamic>{
+        for (final entry in summary.entries)
+          if (savedFields.contains(entry.key)) entry.key: entry.value,
+      };
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(_referralCacheKey, jsonEncode(cachedSummary));
+    } catch (_) {
+      // Referral totals remain available from the server on the next visit.
+    }
+  }
+
   String _referralLoadError(JengaApiResponse? response) {
     if (response == null) {
-      return 'Could not reach JengaBiz. Check your connection and try again.';
+      return _referralSummary != null
+          ? 'Could not refresh now. Your saved points and referral link are still shown.'
+          : 'JengaBiz did not return referral data. Your connection may be working; try again shortly.';
     }
     if (response.statusCode == 401) {
-      return 'Your sign-in needs refreshing. Sign in again to load referral points.';
+      return _referralSummary != null
+          ? 'The referral refresh was rejected. Your saved points and link are still shown.'
+          : 'Your sign-in was rejected. Sign in again to load referral points.';
     }
     final message = response.data['message'];
     if (message is String && message.trim().isNotEmpty) return message.trim();
@@ -1818,6 +2037,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'hasLocation': true,
         };
       });
+      unawaited(_saveReferralSummary(_referralSummary!));
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -2133,7 +2353,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final contact = await FlutterContacts.openExternalPick();
-      if (!mounted || contact == null) return;
+      if (!mounted || !shareContext.mounted || contact == null) return;
       await _shareReferralLink(
         referralLink,
         shareContext,
@@ -2180,7 +2400,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           padding: const EdgeInsets.symmetric(vertical: 20),
           child: Column(
             children: [
-              const Center(child: Avatar(size: 84)),
+              Center(child: _profilePhoto()),
+              if (_profileImageFile != null) ...[
+                Text(
+                  _profileImageType == 'shop' ? 'Shop photo' : 'Personal photo',
+                  style: const TextStyle(fontSize: 11, color: kMuted),
+                ),
+              ],
               const SizedBox(height: 10),
               Center(
                 child: Text(

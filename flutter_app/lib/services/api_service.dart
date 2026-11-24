@@ -19,6 +19,13 @@ class JengaApiResponse {
       statusCode >= 200 && statusCode < 300 && data['success'] == true;
 }
 
+class JengaProfileImage {
+  const JengaProfileImage({required this.imageType, required this.bytes});
+
+  final String imageType;
+  final Uint8List bytes;
+}
+
 class JengaApiService {
   static final JengaApiService instance = JengaApiService._();
   JengaApiService._()
@@ -51,6 +58,8 @@ class JengaApiService {
   String? authToken;
   String? sessionEmail;
   String? shopId;
+  static const _sessionBundleKey = 'jengabiz_session_bundle';
+
   void configure({required String url, String? token, String? currentShopId}) {
     final parsed = Uri.tryParse(url.trim());
     if (parsed == null ||
@@ -93,12 +102,54 @@ class JengaApiService {
   }
 
   Future<void> restoreSession() async {
+    authToken = null;
+    sessionEmail = null;
     try {
-      authToken = await _secureStorage?.read(key: 'jengabiz_session');
-      sessionEmail = await _secureStorage?.read(key: 'jengabiz_session_email');
+      final encoded = await _secureStorage?.read(key: _sessionBundleKey);
+      if (encoded != null) {
+        final decoded = jsonDecode(encoded);
+        if (decoded is Map &&
+            decoded['token'] is String &&
+            decoded['email'] is String) {
+          authToken = (decoded['token'] as String).trim();
+          sessionEmail = (decoded['email'] as String).trim().toLowerCase();
+          if (authToken!.isNotEmpty && sessionEmail!.isNotEmpty) return;
+        }
+      }
+    } catch (_) {
+      // Fall back to sessions written by earlier app versions.
+    }
+
+    try {
+      final legacyToken = await _secureStorage?.read(key: 'jengabiz_session');
+      final legacyEmail =
+          await _secureStorage?.read(key: 'jengabiz_session_email');
+      if (legacyToken != null && legacyEmail != null) {
+        authToken = legacyToken.trim();
+        sessionEmail = legacyEmail.trim().toLowerCase();
+        if (authToken!.isEmpty || sessionEmail!.isEmpty) {
+          authToken = null;
+          sessionEmail = null;
+          return;
+        }
+        unawaited(_migrateLegacySession(authToken!, sessionEmail!));
+      }
     } catch (_) {
       authToken = null;
       sessionEmail = null;
+    }
+  }
+
+  Future<void> _migrateLegacySession(String token, String email) async {
+    try {
+      await _secureStorage?.write(
+        key: _sessionBundleKey,
+        value: jsonEncode({'token': token, 'email': email}),
+      );
+      await _secureStorage?.delete(key: 'jengabiz_session');
+      await _secureStorage?.delete(key: 'jengabiz_session_email');
+    } catch (_) {
+      // The original secure keys remain available if migration is interrupted.
     }
   }
 
@@ -106,11 +157,12 @@ class JengaApiService {
     authToken = token;
     sessionEmail = email.trim().toLowerCase();
     try {
-      await _secureStorage?.write(key: 'jengabiz_session', value: token);
       await _secureStorage?.write(
-        key: 'jengabiz_session_email',
-        value: sessionEmail,
+        key: _sessionBundleKey,
+        value: jsonEncode({'token': token, 'email': sessionEmail}),
       );
+      await _secureStorage?.delete(key: 'jengabiz_session');
+      await _secureStorage?.delete(key: 'jengabiz_session_email');
     } catch (_) {
       // The active session remains available in memory if secure storage is unavailable.
     }
@@ -121,16 +173,18 @@ class JengaApiService {
     sessionEmail = null;
     shopId = null;
     try {
+      await _secureStorage?.delete(key: _sessionBundleKey);
       await _secureStorage?.delete(key: 'jengabiz_session');
       await _secureStorage?.delete(key: 'jengabiz_session_email');
     } catch (_) {}
   }
 
-  void _applyHeaders(HttpHeaders headers) {
+  void _applyHeaders(HttpHeaders headers, {String? authTokenOverride}) {
     headers.set(HttpHeaders.contentTypeHeader, 'application/json');
     headers.set(HttpHeaders.acceptHeader, 'application/json');
-    if (authToken != null) {
-      headers.set(HttpHeaders.authorizationHeader, 'Bearer $authToken');
+    final token = authTokenOverride ?? authToken;
+    if (token != null) {
+      headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
     }
     if (shopId != null) {
       headers.set('X-Shop-Id', shopId!);
@@ -141,6 +195,7 @@ class JengaApiService {
     String method,
     String path, {
     Map<String, dynamic>? payload,
+    String? authTokenOverride,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
     final requestOverride = _requestJsonOverride;
@@ -160,7 +215,7 @@ class JengaApiService {
         'DELETE' => await _client!.deleteUrl(uri),
         _ => await _client!.postUrl(uri),
       };
-      _applyHeaders(req.headers);
+      _applyHeaders(req.headers, authTokenOverride: authTokenOverride);
       if (payload != null) req.write(jsonEncode(payload));
       final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res
@@ -185,9 +240,11 @@ class JengaApiService {
       (await _requestJson('POST', path, payload: payload))?.data;
 
   /// Send the account verification code to the address entered at sign-up.
-  Future<Map<String, dynamic>?> requestEmailOtp(String email) =>
+  Future<Map<String, dynamic>?> requestEmailOtp(String email,
+          {String purpose = 'account_verification'}) =>
       _postJson('/email-auth/request-otp', {
         'email': email.trim().toLowerCase(),
+        'purpose': purpose,
       });
 
   /// Verify a one-time email code and receive a short-lived registration grant.
@@ -219,6 +276,15 @@ class JengaApiService {
 
   Future<JengaApiResponse?> loginAccount(String email, String password) =>
       _requestJson('POST', '/email-auth/login', payload: {
+        'email': email.trim().toLowerCase(),
+        'password': password,
+      });
+
+  Future<JengaApiResponse?> requestSuspendedAccountSupport({
+    required String email,
+    required String password,
+  }) =>
+      _requestJson('POST', '/email-auth/support/request', payload: {
         'email': email.trim().toLowerCase(),
         'password': password,
       });
@@ -372,11 +438,84 @@ class JengaApiService {
     }
   }
 
-  Future<void> logoutAccount() async {
-    if (authToken != null) {
-      await _requestJson('POST', '/email-auth/logout', payload: const {});
+  Future<bool> removeProfileImage() async {
+    final response = await _requestJson(
+      'DELETE',
+      '/email-auth/profile/image',
+      payload: const {},
+    );
+    return response?.succeeded == true;
+  }
+
+  Future<JengaProfileImage?> fetchProfileImage() async {
+    final client = _client;
+    if (client == null) return null;
+    try {
+      final request = await client.getUrl(
+        Uri.parse('$baseUrl/email-auth/profile/image'),
+      );
+      request.headers
+          .set(HttpHeaders.acceptHeader, 'image/jpeg, image/png, image/webp');
+      if (authToken != null) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $authToken');
+      }
+      final response =
+          await request.close().timeout(const Duration(seconds: 10));
+      if (response.statusCode != HttpStatus.ok ||
+          response.contentLength > 1024 * 1024) {
+        await response.drain<void>();
+        return null;
+      }
+      final imageType = response.headers.value('x-profile-image-type');
+      final mimeType = response.headers.contentType?.mimeType;
+      if (!const {'personal', 'shop'}.contains(imageType) ||
+          !const {'image/jpeg', 'image/png', 'image/webp'}.contains(mimeType)) {
+        await response.drain<void>();
+        return null;
+      }
+      final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
+        if (all.length + chunk.length > 1024 * 1024) {
+          throw const FormatException('Profile photo is larger than 1 MB.');
+        }
+        all.addAll(chunk);
+        return all;
+      }).timeout(const Duration(seconds: 10));
+      return bytes.isEmpty
+          ? null
+          : JengaProfileImage(
+              imageType: imageType!, bytes: Uint8List.fromList(bytes));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> logoutAccount({String? deviceToken}) async {
+    final token = authToken;
+    final payload = <String, dynamic>{};
+    if (deviceToken != null && deviceToken.isNotEmpty) {
+      payload['deviceToken'] = deviceToken;
+    }
+    if (token != null) {
+      unawaited(_revokeRemoteSession(token, payload));
     }
     await clearSession();
+  }
+
+  Future<void> _revokeRemoteSession(
+    String token,
+    Map<String, dynamic> payload,
+  ) async {
+    try {
+      await _requestJson(
+        'POST',
+        '/email-auth/logout',
+        payload: payload,
+        authTokenOverride: token,
+      );
+    } catch (_) {
+      // Local sign-out is already complete; the server request is best effort.
+    }
   }
 
   /// Fetch Catalog items from C# API (with Cache-aside pattern)
