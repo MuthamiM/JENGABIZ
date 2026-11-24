@@ -10,6 +10,7 @@ import '../services/db_service.dart';
 import '../services/api_service.dart';
 import '../services/firebase_push_service.dart';
 import '../services/location_biometric_service.dart';
+import 'suspended_account_help_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key, required this.onSuccess, required this.onBack});
@@ -41,12 +42,9 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _loading = false;
   bool _canUseBiometrics = false;
   bool _accountSuspended = false;
-  bool _supportRequestSending = false;
-  String? _supportTicketId;
   String? _detectedReferralCounty;
   String? _error;
   String _supportName = 'MF Technologies';
-  String _supportAdminName = 'MF Technologies Admin';
   String _supportEmail = 'info@mftechnologies.org';
   List<String> _supportPhoneNumbers = const ['0748329410', '0712742991'];
 
@@ -86,7 +84,6 @@ class _AuthScreenState extends State<AuthScreen> {
       _loading = true;
       _error = null;
       _accountSuspended = false;
-      _supportTicketId = null;
     });
 
     try {
@@ -537,14 +534,10 @@ class _AuthScreenState extends State<AuthScreen> {
     _accountSuspended = true;
     if (rawSupport is! Map) return;
     final name = rawSupport['name'];
-    final adminName = rawSupport['adminName'];
     final email = rawSupport['email'];
     final phones = rawSupport['phoneNumbers'];
     if (name is String && name.trim().isNotEmpty) {
       _supportName = name.trim();
-    }
-    if (adminName is String && adminName.trim().isNotEmpty) {
-      _supportAdminName = adminName.trim();
     }
     if (email is String && email.trim().isNotEmpty) {
       _supportEmail = email.trim();
@@ -586,88 +579,28 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _requestSuspensionReview() async {
-    if (_supportRequestSending) return;
-    final shouldSend = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Send a review request?'),
-        content: Text(
-          'Your name, shop, email and phone number will be sent to $_supportName so the admin team can review this suspended account. Your password is used only to verify the account and is never sent to support.',
+  void _openSuspensionHelp() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SuspendedAccountHelpScreen(
+          email: _emailCtrl.text.trim(),
+          supportName: _supportName,
+          supportEmail: _supportEmail,
+          supportPhoneNumbers: _supportPhoneNumbers,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Send request'),
-          ),
-        ],
       ),
     );
-    if (shouldSend != true || !mounted) return;
-
-    setState(() => _supportRequestSending = true);
-    try {
-      final response =
-          await JengaApiService.instance.requestSuspendedAccountSupport(
-        email: _emailCtrl.text,
-        password: _passwordCtrl.text,
-      );
-      if (response?.succeeded == true) {
-        final ticketId = response?.data['ticketId'] as String?;
-        if (!mounted) return;
-        setState(() {
-          _supportTicketId = ticketId;
-          _error = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ticketId == null
-                ? 'Review request sent to MF Technologies.'
-                : 'Review request sent. Reference: $ticketId'),
-          ),
-        );
-      } else {
-        final message = response?.data['message'] as String? ??
-            'Could not send the review request. Use the contact options below.';
-        if (response?.data['support'] != null) {
-          _applySuspensionSupport(response?.data['support']);
-        }
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-        }
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Could not reach MF Technologies. Use the contact options below.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _supportRequestSending = false);
-    }
   }
 
   Widget _errorPanel() {
     final error = _error;
     if (error == null && !_accountSuspended) return const SizedBox.shrink();
-    final requestSent = _accountSuspended && _supportTicketId != null;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: requestSent && error == null
-            ? const Color(0xFFEAF7EF)
-            : const Color(0xFFFFECEB),
+        color: const Color(0xFFFFECEB),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -679,7 +612,7 @@ class _AuthScreenState extends State<AuthScreen> {
           if (_accountSuspended) ...[
             const SizedBox(height: 10),
             Text(
-              'Contact $_supportName support. Your case is handled by $_supportAdminName.',
+              'If you believe this suspension should be reviewed, you can request help from $_supportName.',
               style: const TextStyle(
                 color: Color(0xFF343247),
                 fontSize: 12,
@@ -687,38 +620,22 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ),
             const SizedBox(height: 4),
-            if (_supportTicketId case final ticketId?) ...[
-              Text(
-                'Request sent to MF Technologies · $ticketId',
-                style: const TextStyle(
-                  color: Color(0xFF197346),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _openSuspensionHelp,
+                icon: const Icon(Icons.help_outline_rounded, size: 17),
+                label: const Text(
+                  'Get help',
+                  style: TextStyle(decoration: TextDecoration.underline),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF1E6BFF),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
-            ] else ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed:
-                      _supportRequestSending ? null : _requestSuspensionReview,
-                  icon: _supportRequestSending
-                      ? const SizedBox.square(
-                          dimension: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.outgoing_mail, size: 17),
-                  label: Text(_supportRequestSending
-                      ? 'Sending request…'
-                      : 'Send support request'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF1E6BFF),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ),
-            ],
+            ),
             Wrap(
               spacing: 4,
               runSpacing: 0,
@@ -842,9 +759,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                if (_error != null ||
-                    (_accountSuspended && _supportTicketId != null))
-                  _errorPanel(),
+                if (_error != null) _errorPanel(),
 
                 _field(
                   label: '6-Digit Verification Code',
@@ -1052,9 +967,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 20),
                 ],
 
-                if (_error != null ||
-                    (_accountSuspended && _supportTicketId != null))
-                  _errorPanel(),
+                if (_error != null) _errorPanel(),
 
                 if (isSignUp) ...[
                   _field(

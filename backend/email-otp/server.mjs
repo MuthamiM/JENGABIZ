@@ -808,10 +808,21 @@ export function createEmailOtpHandler({
 
       if (path === supportRequestPath) {
         const password = typeof payload?.password === 'string' ? payload.password : '';
+        const reason = typeof payload?.reason === 'string'
+          ? payload.reason.trim()
+            .replace(/\r\n?/g, '\n')
+            .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+          : '';
         if (password.length < 8 || Buffer.byteLength(password) > 1024) {
           return json(response, 400, {
             success: false,
             message: 'Sign in with your current password before requesting a review.',
+          });
+        }
+        if (reason.length < 20 || reason.length > 2000) {
+          return json(response, 400, {
+            success: false,
+            message: 'Explain why this account should be reviewed in 20 to 2,000 characters.',
           });
         }
 
@@ -884,7 +895,12 @@ export function createEmailOtpHandler({
                 'JengaBiz suspended-account review request.',
                 `Account ID: ${account.id}`,
                 `Shop: ${account.shopName}`,
-                'The account holder requested a review and can be contacted using the account details above.',
+                'The account holder requests a suspension review and possible reactivation.',
+                '',
+                'Customer explanation:',
+                reason,
+                '',
+                'Contact the customer at the registered email if the request qualifies for reactivation.',
               ].join('\n'),
             }),
             signal: AbortSignal.timeout(8000),

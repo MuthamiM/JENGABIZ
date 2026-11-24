@@ -283,10 +283,12 @@ class JengaApiService {
   Future<JengaApiResponse?> requestSuspendedAccountSupport({
     required String email,
     required String password,
+    required String reason,
   }) =>
       _requestJson('POST', '/email-auth/support/request', payload: {
         'email': email.trim().toLowerCase(),
         'password': password,
+        'reason': reason.trim(),
       });
 
   Future<JengaApiResponse?> fetchAccountProfile() =>

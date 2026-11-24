@@ -23,7 +23,7 @@ const jengaBizTerms = LegalDocument(
     ),
     LegalSection(
       'Your account and security',
-      'Provide accurate account and shop details, verify your email address, and keep your password, device, and one-time codes private. You are responsible for activity on your account and for limiting access to your shop records. Contact MF Technologies promptly if you believe someone has accessed your account without permission.',
+      'Provide accurate account and shop details, verify your email address, and keep your password, device, and one-time codes private. You are responsible for activity on your account and for limiting access to your shop records. Contact MF Technologies if you believe someone has accessed your account without permission. If your account is suspended, use Get help in the app to explain why you are asking for a review. MF Technologies will review the request and contact your registered email if it qualifies for reactivation. Sending a request does not guarantee reactivation.',
     ),
     LegalSection(
       'Shop records and photos',
@@ -69,11 +69,11 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'Information we use',
-      'Account details can include your name, shop name, email address, optional phone number, password hash, account settings, and county recorded for referral eligibility. Some accounts may still contain one profile photo uploaded before profile photo uploads were disabled. You can remove it from Profile; removal is permanent and it cannot be restored. Shop records include products, categories, SKUs or barcodes, quantities, prices, costs, sales activity, and product images. We use this information to provide the app features you request.',
+      'Account details can include your name, shop name, email address, optional phone number, sign-in information, account settings, and county recorded for referral eligibility. Some accounts may still contain one profile photo uploaded before profile photo uploads were disabled. You can remove it from Profile; removal is permanent and it cannot be restored. Shop records include products, categories, SKUs or barcodes, quantities, prices, costs, sales activity, and product images. We use this information to provide the app features you request. If you ask for a suspension review, we share your explanation and account contact details with MF Technologies so the team can assess your request and contact your registered email if it qualifies for reactivation.',
     ),
     LegalSection(
       'Verification and notifications',
-      'Email verification uses your email address and a short-lived one-time code. When push notifications are enabled, the app registers a device messaging token and platform so stock alerts can be delivered to that device. You can turn off push alerts in your profile; Android permission settings also apply.',
+      'Email verification uses your email address and temporary verification information. When push notifications are enabled, limited account and device information is used to deliver stock alerts. You can turn off push alerts in your profile; Android permission settings also apply.',
     ),
     LegalSection(
       'Location and device features',
@@ -81,11 +81,11 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'On-device storage and syncing',
-      'The app stores the session credential in Android secure storage and keeps settings, shop data, any existing profile photo, and product image cache on the phone for faster access and supported offline work. Profile photos uploaded earlier remain in your JengaBiz account until removed. New profile photo uploads are disabled. Product images and supported stock changes sync when online; unsynced changes may be lost if app data is cleared, the app is removed, or the phone is lost first.',
+      'The app keeps sign-in information, settings, shop data, any existing profile photo, and selected product images on your phone for faster access and supported offline work. Profile photos uploaded earlier remain in your JengaBiz account until removed. New profile photo uploads are disabled. Product images and supported stock changes sync when online; unsynced changes may be lost if app data is cleared, the app is removed, or the phone is lost first.',
     ),
     LegalSection(
       'Service providers',
-      'MF Technologies uses providers for email verification, push notifications, hosting, and network security. Verification emails are sent through Resend and push notifications use Firebase Cloud Messaging. Providers receive information needed to provide those services and may process it in other countries depending on their infrastructure. The JengaBiz website does not use advertising or analytics trackers.',
+      'MF Technologies relies on service providers for communications, hosting, notifications, and related service delivery. They receive information needed for their work and may process it in other countries depending on their operations. The JengaBiz website does not currently use advertising or analytics tools.',
     ),
     LegalSection(
       'Retention and requests',
@@ -97,7 +97,7 @@ const jengaBizPrivacy = LegalDocument(
     ),
     LegalSection(
       'Security and updates',
-      'We use reasonable safeguards, including encrypted connections for public services, password hashing, restricted account access, and Android secure storage for session credentials. No online service or device can be guaranteed completely secure. Use a device lock and do not share passwords or verification codes. We update this policy when our information practices change.',
+      'MF Technologies uses reasonable administrative, technical, and organizational safeguards to protect information. No online service or device can be guaranteed completely secure. Keep your device protected and do not share your password or verification codes. We update this policy when our information practices change.',
     ),
   ],
 );
