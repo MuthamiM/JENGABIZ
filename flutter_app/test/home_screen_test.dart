@@ -4,6 +4,7 @@ import 'package:duka_ledger/services/api_service.dart';
 import 'package:duka_ledger/services/db_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -62,8 +63,28 @@ void main() {
 
   testWidgets('welcome screen appears without an intermediate loading page',
       (tester) async {
+    SharedPreferences.setMockInitialValues({});
     JengaDB.instance.isInitialized = false;
+    JengaDB.instance.users = [];
+    JengaDB.instance.currentUser = null;
+    JengaDB.instance.shouldResumeSavedSession = false;
+    JengaApiService.instance.authToken = null;
+    JengaApiService.instance.sessionEmail = null;
+
     await tester.pumpWidget(const MaterialApp(home: Root()));
+    expect(find.text('Loading JengaBiz…'), findsNothing);
+
+    // Pump both FakeAsync microtasks/timers (SharedPreferences, channels, switcher)
+    // and real async I/O until _initializeApp transitions from splash to welcome.
+    for (var i = 0;
+        i < 15 && find.text('Explore JengaBiz').evaluate().isEmpty;
+        i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 80)),
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Loading JengaBiz…'), findsNothing);
     expect(find.text('Explore JengaBiz'), findsOneWidget);
@@ -221,7 +242,10 @@ void main() {
     expect(find.text('X (Twitter)'), findsNothing);
 
     await tester.tap(find.text('Refer & Earn'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(
       find.text('https://jengabiz.mftechnologies.org/?ref=referral'),

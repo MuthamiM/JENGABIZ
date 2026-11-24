@@ -160,13 +160,14 @@ void main() {
 
     expect(find.text('Email Address'), findsOneWidget);
     expect(find.text('Password'), findsOneWidget);
-    expect(find.text('By continuing, you agree to our'), findsOneWidget);
+    expect(find.text('Read:'), findsOneWidget);
     expect(find.text('Touch Sensor'), findsNothing);
     expect(find.textContaining('Musa'), findsNothing);
 
     await tester.tap(find.text('Terms of Use'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('JengaBiz provides tools'), findsOneWidget);
+    expect(find.textContaining('JengaBiz is provided by MF Technologies'),
+        findsOneWidget);
   });
 
   testWidgets(

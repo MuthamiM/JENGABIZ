@@ -362,7 +362,8 @@ class _UpdateScreenState extends State<UpdateScreen>
                           : _onPrimaryPressed,
                       style: FilledButton.styleFrom(
                         backgroundColor: _updateBlue,
-                        disabledBackgroundColor: _updateBlue.withOpacity(.45),
+                        disabledBackgroundColor:
+                            _updateBlue.withValues(alpha: .45),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(15),
