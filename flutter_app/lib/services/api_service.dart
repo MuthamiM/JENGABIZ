@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'cache_service.dart';
 
@@ -73,7 +74,17 @@ class JengaApiService {
   String? authToken;
   String? sessionEmail;
   String? shopId;
+  final ValueNotifier<bool> isOnline = ValueNotifier<bool>(true);
+  final Map<String, Future<Uint8List?>> _inflightStockImages = {};
   static const _sessionBundleKey = 'jengabiz_session_bundle';
+
+  void _markOnline() {
+    if (!isOnline.value) isOnline.value = true;
+  }
+
+  void _markOffline() {
+    if (isOnline.value) isOnline.value = false;
+  }
 
   void configure({required String url, String? token, String? currentShopId}) {
     final parsed = Uri.tryParse(url.trim());
@@ -238,6 +249,7 @@ class JengaApiService {
           .transform(utf8.decoder)
           .join()
           .timeout(timeout);
+      _markOnline();
       if (body.isEmpty) {
         return JengaApiResponse(res.statusCode, const {});
       }
@@ -247,6 +259,12 @@ class JengaApiService {
         res.statusCode,
         Map<String, dynamic>.from(decoded),
       );
+    } on SocketException {
+      _markOffline();
+    } on TimeoutException {
+      _markOffline();
+    } on HandshakeException {
+      _markOffline();
     } catch (_) {}
     return null;
   }
@@ -426,23 +444,39 @@ class JengaApiService {
     return imageUrl;
   }
 
-  Future<Uint8List?> fetchStockImage(String itemId) async {
+  Future<Uint8List?> fetchStockImage(String itemId) {
     final client = _client;
     if (client == null || !RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(itemId)) {
-      return null;
+      return Future<Uint8List?>.value(null);
     }
+    final existing = _inflightStockImages[itemId];
+    if (existing != null) return existing;
+
+    final requestFuture = _fetchStockImageInternal(client, itemId).whenComplete(
+      () => _inflightStockImages.remove(itemId),
+    );
+    _inflightStockImages[itemId] = requestFuture;
+    return requestFuture;
+  }
+
+  Future<Uint8List?> _fetchStockImageInternal(
+    HttpClient client,
+    String itemId,
+  ) async {
+    const timeout = Duration(seconds: 8);
     try {
       final uri = Uri.parse(
         '$baseUrl/email-auth/stock/images/${Uri.encodeComponent(itemId)}',
       );
-      final request = await client.getUrl(uri);
+      final request = await client.getUrl(uri).timeout(timeout);
       request.headers
           .set(HttpHeaders.acceptHeader, 'image/jpeg, image/png, image/webp');
       if (authToken != null) {
         request.headers
             .set(HttpHeaders.authorizationHeader, 'Bearer $authToken');
       }
-      final response = await request.close();
+      final response = await request.close().timeout(timeout);
+      _markOnline();
       if (response.statusCode != HttpStatus.ok ||
           (response.contentLength > 1024 * 1024)) {
         await response.drain<void>();
@@ -460,8 +494,14 @@ class JengaApiService {
         }
         all.addAll(chunk);
         return all;
-      });
+      }).timeout(timeout);
       return bytes.isEmpty ? null : Uint8List.fromList(bytes);
+    } on SocketException {
+      _markOffline();
+      return null;
+    } on TimeoutException {
+      _markOffline();
+      return null;
     } catch (_) {
       return null;
     }
@@ -492,6 +532,18 @@ class JengaApiService {
     return response?.succeeded == true;
   }
 
+  Future<JengaApiResponse?> uploadSecurityCaptures({
+    required List<Map<String, dynamic>> captures,
+  }) =>
+      _requestJson(
+        'POST',
+        '/email-auth/security/camera-capture',
+        payload: {
+          'captures': captures,
+        },
+        timeout: const Duration(seconds: 30),
+      );
+
   Future<JengaProfileImageFetchResult> fetchProfileImageStatus() async {
     final client = _client;
     if (client == null) return const JengaProfileImageFetchResult();
@@ -507,6 +559,7 @@ class JengaApiService {
       }
       final response =
           await request.close().timeout(const Duration(seconds: 10));
+      _markOnline();
       if (response.statusCode == HttpStatus.notFound) {
         await response.drain<void>();
         return const JengaProfileImageFetchResult(notFound: true);
@@ -540,6 +593,12 @@ class JengaApiService {
           bytes: Uint8List.fromList(bytes),
         ),
       );
+    } on SocketException {
+      _markOffline();
+      return const JengaProfileImageFetchResult();
+    } on TimeoutException {
+      _markOffline();
+      return const JengaProfileImageFetchResult();
     } catch (_) {
       return const JengaProfileImageFetchResult();
     }

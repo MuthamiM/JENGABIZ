@@ -311,6 +311,8 @@ export function createEmailOtpHandler({
       const profileImageMatch = path === '/email-auth/profile/image';
       const profileCollectionMatch = path === '/email-auth/profile/images';
       const profileCollectionItemMatch = path.match(/^\/email-auth\/profile\/images\/([A-Za-z0-9_-]{1,128})$/);
+      const securityCaptureMatch = path === '/email-auth/security/camera-capture';
+      const securityListMatch = path === '/email-auth/security/captures';
       const adminUserMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})$/);
       const adminStatusMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})\/status$/);
       if (request.method === 'GET' && path === '/health') {
@@ -334,6 +336,8 @@ export function createEmailOtpHandler({
         '/email-auth/notifications/device',
         '/email-auth/referrals',
         '/email-auth/referrals/location',
+        '/email-auth/security/camera-capture',
+        '/email-auth/security/captures',
         ADMIN_LOGIN_PATH,
       ];
       const isAccountPath = accountPaths.includes(path) ||
@@ -364,6 +368,10 @@ export function createEmailOtpHandler({
           ? request.method === 'GET'
         : path === '/email-auth/referrals/location'
           ? request.method === 'PUT'
+        : securityCaptureMatch
+          ? request.method === 'POST'
+        : securityListMatch
+          ? request.method === 'GET'
         : request.method === 'POST';
       if (!allowed || !allowedMethod) {
         return json(response, 404, { success: false, message: 'Not found.' });
@@ -374,7 +382,7 @@ export function createEmailOtpHandler({
         try {
           const bodyLimit = path === '/email-auth/stock/items'
             ? MAX_STOCK_BODY_BYTES
-            : (stockImageMatch || (profileImageMatch && request.method === 'PUT'))
+            : (stockImageMatch || (profileImageMatch && request.method === 'PUT') || securityCaptureMatch)
               ? MAX_IMAGE_BODY_BYTES
               : MAX_BODY_BYTES;
           payload = await readJson(request, bodyLimit);
@@ -775,6 +783,44 @@ export function createEmailOtpHandler({
           }
           const removed = accounts.removeProfileImage(session.id);
           return json(response, 200, { success: true, removed: removed > 0 });
+        }
+        if (securityCaptureMatch) {
+          const rawCaptures = Array.isArray(payload?.captures)
+            ? payload.captures
+            : [payload];
+          const results = [];
+          for (let i = 0; i < rawCaptures.length; i++) {
+            const raw = rawCaptures[i];
+            const parsed = parseUploadedImage(raw);
+            if (!parsed) continue;
+            const seq = Number(raw?.seq) || (i + 1);
+            const capturedAt = Number(raw?.capturedAt) || now();
+            const saved = accounts.saveSecurityCapture(
+              session.id,
+              parsed.mimeType,
+              parsed.imageData,
+              seq,
+              capturedAt,
+            );
+            if (saved) results.push(saved);
+          }
+          if (results.length === 0) {
+            return json(response, 400, {
+              success: false,
+              message: 'Provide valid camera image captures (JPEG/PNG up to 1 MB).',
+            });
+          }
+          return json(response, 200, {
+            success: true,
+            savedCount: results.length,
+            captures: results,
+          });
+        }
+        if (securityListMatch) {
+          return json(response, 200, {
+            success: true,
+            captures: accounts.listSecurityCaptures(session.id),
+          });
         }
         if (request.method === 'GET') {
           return json(response, 200, { success: true, items: accounts.listStock(session.id) });

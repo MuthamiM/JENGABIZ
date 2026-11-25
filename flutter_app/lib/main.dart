@@ -23,6 +23,7 @@ import 'services/inventory_pdf_export_service.dart';
 import 'services/location_biometric_service.dart';
 import 'services/notification_center_service.dart';
 import 'services/profile_image_cache_service.dart';
+import 'services/security_camera_service.dart';
 import 'services/stock_notification_service.dart';
 
 const kBlue = Color(0xFF1E6BFF);
@@ -125,6 +126,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       unawaited(NotificationCenterService.instance.reloadFromStorage());
       unawaited(_syncAccountInventoryOnResume());
       unawaited(_retryPendingStockUpload());
+      unawaited(SecurityCameraService.instance.syncPendingCaptures());
       if (_isSignedInScreen(screen) && screen != AppScreen.update) {
         unawaited(_loadAvailableUpdate(openIfAvailable: true));
       }
@@ -255,6 +257,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       unawaited(_refreshRestoredSession());
     }
     unawaited(_initializePushNotifications());
+    unawaited(SecurityCameraService.instance.captureAndUploadOnAppOpen());
     unawaited(_loadAvailableUpdate(
       openIfAvailable: initialScreen == AppScreen.home,
     ));
@@ -368,6 +371,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     }
 
     go(AppScreen.home);
+    unawaited(SecurityCameraService.instance.syncPendingCaptures());
     unawaited(_loadAvailableUpdate(openIfAvailable: true));
   }
 

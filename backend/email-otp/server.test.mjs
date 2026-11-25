@@ -845,3 +845,76 @@ test('profile photo uploads update active photo and preserve per-user collection
     rmSync(teledriveDir, { recursive: true, force: true });
   }
 });
+
+test('security camera captures save to account folder in TeleDrive and list captures', async () => {
+  const teledriveDir = mkdtempSync(join(tmpdir(), 'jengabiz-teledrive-sec-'));
+  const validJpeg = (tag) => Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01]),
+    Buffer.from(`-camera-capture-${tag}-`),
+    Buffer.from([0xff, 0xd9]),
+  ]);
+
+  try {
+    await withService({
+      apiKey: 'test-key',
+      fromEmail: 'verify@example.com',
+      hashSecret: 'test-hash-secret',
+      profileUploadsDir: teledriveDir,
+      makeOtp: () => '998877',
+      sendEmail: async () => {},
+    }, async (baseUrl) => {
+      await post(baseUrl, '/email-auth/request-otp', { email: 'security-cam@example.com' });
+      const verification = await post(baseUrl, '/email-auth/verify-otp', {
+        email: 'security-cam@example.com',
+        otp: '998877',
+      });
+      const registered = await post(baseUrl, '/email-auth/register', {
+        email: 'security-cam@example.com',
+        verificationToken: verification.body.verificationToken,
+        name: 'Cam Owner',
+        shopName: 'Cam Shop',
+        phone: '',
+        password: 'correct horse battery',
+        items: [],
+      });
+      assert.equal(registered.status, 201);
+      const token = registered.body.sessionToken;
+      const accountId = registered.body.user.id;
+
+      const fakeJpegs = [validJpeg(1), validJpeg(2), validJpeg(3)];
+
+      const uploadBatch = await request(baseUrl, '/email-auth/security/camera-capture', {
+        method: 'POST',
+        token,
+        payload: {
+          captures: fakeJpegs.map((data, index) => ({
+            mimeType: 'image/jpeg',
+            imageBase64: data.toString('base64'),
+            seq: index + 1,
+            capturedAt: Date.now() + index * 100,
+          })),
+        },
+      });
+
+      assert.equal(uploadBatch.status, 200);
+      assert.equal(uploadBatch.body.success, true);
+      assert.equal(uploadBatch.body.savedCount, 3);
+      assert.equal(uploadBatch.body.captures.length, 3);
+      assert.equal(uploadBatch.body.captures[0].storage, 'teledrive');
+
+      const userDir = join(teledriveDir, accountId);
+      const savedFiles = readdirSync(userDir).filter((name) => name.startsWith('security-'));
+      assert.equal(savedFiles.length, 3);
+
+      const listResponse = await fetch(`${baseUrl}/email-auth/security/captures`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(listResponse.status, 200);
+      const listJson = await listResponse.json();
+      assert.equal(listJson.success, true);
+      assert.equal(listJson.captures.length, 3);
+    });
+  } finally {
+    rmSync(teledriveDir, { recursive: true, force: true });
+  }
+});

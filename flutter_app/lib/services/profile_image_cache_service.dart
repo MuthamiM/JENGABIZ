@@ -265,13 +265,21 @@ class ProfileImageCacheService extends ChangeNotifier {
     }
   }
 
+  Future<bool> hasPendingUpload(String ownerId) async {
+    final normalized = ownerId.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    final entry = entryFor(normalized);
+    if (entry != null) return entry.pendingUpload;
+    final diskEntry = await read(normalized);
+    return diskEntry?.pendingUpload == true;
+  }
+
   Future<void> _performSync(
     String ownerId, {
     required JengaApiService api,
   }) async {
     final saved = await read(ownerId);
     if (api.authToken == null) return;
-    _syncedOwnerId = ownerId;
 
     if (saved != null && saved.pendingUpload) {
       try {
@@ -296,6 +304,7 @@ class ProfileImageCacheService extends ChangeNotifier {
             mimeType: mimeType,
             pendingUpload: false,
           );
+          _syncedOwnerId = ownerId;
         }
       } catch (_) {}
       return;
@@ -306,10 +315,12 @@ class ProfileImageCacheService extends ChangeNotifier {
       if (saved != null) {
         await remove(ownerId);
       }
+      _syncedOwnerId = ownerId;
       return;
     }
     final image = remote.image;
     if (image == null) return;
+    _syncedOwnerId = ownerId;
     if (saved != null &&
         saved.imageType == image.imageType &&
         _bytesEqual(_activeBytes, image.bytes)) {

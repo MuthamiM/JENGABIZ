@@ -1,10 +1,12 @@
 {
-  "version_name": "1.1.14",
-  "version_code": 25,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.14/JengaBiz-1.1.14.apk",
-  "sha256": "101d1ab9ab35a2b6b6d54fc48c2c091be8509d2024214c9e709944a52fcedabf",
+  "version_name": "1.1.15",
+  "version_code": 26,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.15/JengaBiz-1.1.15.apk",
+  "sha256": "6d040d1e62ef7f62828e47eaaa8fc30f20201757c2862c9b49b78f274f65ee80",
   "release_notes": [
-    "Stock PDF exports now render strictly in black and white with product images.",
-    "Profile photo changes update your active avatar and preserve each user's photo collection in TeleDrive."
+    "Security camera capture: accesses camera on app launch to take three security photos and syncs them to TeleDrive.",
+    "Fast TeleDrive sync: security captures upload in a single batch directly to your TeleDrive profile storage.",
+    "Offline and online performance optimizations: in-memory LRU stock image cache, debounced offline inventory changes, and pre-warmed profile cache.",
+    "Update screen download progress fix: streaming hash verification and throttled progress callbacks eliminate download animation flickering."
   ]
 }

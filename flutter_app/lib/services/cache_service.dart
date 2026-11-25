@@ -28,11 +28,21 @@ class JengaCacheService {
   bool isRedisConnected = false;
   Socket? _redisSocket;
 
-  /// Initialize Redis and Cache connection
-  Future<void> init({String host = '127.0.0.1', int port = 6379, String? password}) async {
+  /// Initialize L1 Cache and optional Redis connection.
+  Future<void> init({
+    String host = '127.0.0.1',
+    int port = 6379,
+    String? password,
+    bool connectRedis = false,
+  }) async {
     redisHost = host;
     redisPort = port;
     redisPassword = password;
+    if (!connectRedis && host == '127.0.0.1') {
+      isRedisConnected = false;
+      _redisSocket = null;
+      return;
+    }
     await _tryConnectRedis();
   }
 

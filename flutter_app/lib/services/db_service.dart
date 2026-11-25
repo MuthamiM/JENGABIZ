@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart'
     show MethodChannel, MissingPluginException, PlatformException, rootBundle;
 import 'package:path_provider/path_provider.dart';
@@ -144,6 +145,9 @@ class JengaDB {
   bool isInitialized = false;
   bool shouldResumeSavedSession = false;
   Future<bool>? _stockSyncFuture;
+  Timer? _backgroundSyncTimer;
+  final ValueNotifier<int> inventoryRevision = ValueNotifier<int>(0);
+  final ValueNotifier<bool> hasUnsyncedStock = ValueNotifier<bool>(false);
   String nearestHubName = 'Industrial Area Logistics Point';
   double nearestHubDistanceKm = 4.2;
   double? latitude;
@@ -155,10 +159,10 @@ class JengaDB {
 
     try {
       await JengaApiService.instance.restoreSession();
-      await JengaCacheService.instance.init();
+      unawaited(JengaCacheService.instance.init());
       final prefs = await SharedPreferences.getInstance();
 
-      // 1. Load users
+      // 1. Load saved local accounts and resolve active owner before loading stock.
       final usersJson = prefs.getString('jengabiz_users');
       if (usersJson != null) {
         final List list = jsonDecode(usersJson);
@@ -166,52 +170,72 @@ class JengaDB {
       }
 
       if (users.isNotEmpty) {
-        // Check logged in user
         final currentUserId = prefs.getString('current_user_id');
         if (currentUserId != null) {
           final match = users.where((u) => u.id == currentUserId);
-          if (match.isNotEmpty) {
-            currentUser = match.first;
-          } else {
-            currentUser = users.first;
-          }
+          currentUser = match.isNotEmpty ? match.first : users.first;
         } else {
           currentUser = users.first;
         }
       }
 
-      // 2. Load Stock Items (from Cache first, then file / seed)
-      final cached = await JengaCacheService.instance.get<List>('items:all');
-      if (cached != null) {
-        items = cached
-            .map((e) => StockItem.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
+      final api = JengaApiService.instance;
+      final sessionEmail = api.sessionEmail?.trim().toLowerCase();
+      if (api.authToken != null &&
+          sessionEmail != null &&
+          sessionEmail.isNotEmpty) {
+        shouldResumeSavedSession = true;
+        final savedAccount = findUser(sessionEmail);
+        if (savedAccount != null) {
+          currentUser = savedAccount;
+        }
+      }
+
+      final targetOwnerId =
+          currentUser?.id ?? prefs.getString('jengabiz_inventory_owner_id');
+
+      // 2. Load owner-scoped inventory directly for fast offline/online cold start.
+      List<StockItem>? loadedItems;
+      if (targetOwnerId != null) {
+        final cacheKey = 'items:$targetOwnerId';
+        final cached = await JengaCacheService.instance.get<List>(cacheKey);
+        if (cached != null) {
+          loadedItems = cached
+              .map((e) => StockItem.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        } else {
+          loadedItems = await _readInventorySnapshot(targetOwnerId);
+          if (loadedItems != null) {
+            await JengaCacheService.instance.set(
+              cacheKey,
+              loadedItems.map((e) => e.toJson()).toList(),
+            );
+          }
+        }
+      }
+
+      if (loadedItems != null) {
+        items = loadedItems;
+        inventoryOwnerId = targetOwnerId;
       } else {
         final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/jengabiz_inventory.json');
-
-        if (await file.exists()) {
-          final content = await file.readAsString();
-          final List list = jsonDecode(content);
+        final legacyFile = File('${dir.path}/jengabiz_inventory.json');
+        if (await legacyFile.exists()) {
+          final List list = jsonDecode(await legacyFile.readAsString());
           items = list.map((e) => StockItem.fromJson(e)).toList();
-        } else {
+          inventoryOwnerId = prefs.getString('jengabiz_inventory_owner_id');
+        } else if (currentUser == null) {
           final assetJson = await rootBundle.loadString('assets/items_db.json');
           final List list = jsonDecode(assetJson);
           items = list.map((e) => StockItem.fromJson(e)).toList();
-          await file
-              .writeAsString(jsonEncode(items.map((e) => e.toJson()).toList()));
+          await legacyFile.writeAsString(
+              jsonEncode(items.map((e) => e.toJson()).toList()));
+        } else {
+          items = <StockItem>[];
+          inventoryOwnerId = currentUser!.id;
         }
-
-        // Cache loaded items into L1/L2 Redis
-        await JengaCacheService.instance
-            .set('items:all', items.map((e) => e.toJson()).toList());
       }
 
-      inventoryOwnerId =
-          prefs.getString('jengabiz_inventory_owner_id') ?? currentUser?.id;
-      if (inventoryOwnerId != null) {
-        await _saveInventorySnapshot(inventoryOwnerId!, items);
-      }
       if (currentUser != null && inventoryOwnerId != currentUser!.id) {
         final savedItems = await _readInventorySnapshot(currentUser!.id);
         items = savedItems ?? <StockItem>[];
@@ -221,20 +245,12 @@ class JengaDB {
         inventoryOwnerId = currentUser!.id;
         await prefs.setString('jengabiz_inventory_owner_id', currentUser!.id);
       }
-
-      // Choose the locally saved account before the first frame. The server
-      // profile and inventory refresh happen after startup so a slow network
-      // cannot hold the app on its splash screen.
-      final api = JengaApiService.instance;
-      final sessionEmail = api.sessionEmail?.trim().toLowerCase();
-      if (api.authToken != null &&
-          sessionEmail != null &&
-          sessionEmail.isNotEmpty) {
-        shouldResumeSavedSession = true;
-        final savedAccount = findUser(sessionEmail);
-        if (savedAccount != null && currentUser?.id != savedAccount.id) {
-          await _activateLocalUser(savedAccount);
-        }
+      if (currentUser != null) {
+        hasUnsyncedStock.value =
+            prefs.getBool(_stockSyncKey(currentUser!.id)) ?? false;
+        unawaited(ProfileImageCacheService.instance
+            .read(currentUser!.id)
+            .catchError((_) => null));
       }
     } catch (e) {
       try {
@@ -244,9 +260,10 @@ class JengaDB {
       } catch (_) {}
     }
 
-    await _refreshStockWidget();
+    unawaited(_refreshStockWidget());
     await NotificationCenterService.instance
         .setAccountScope(currentUser?.email ?? currentUser?.id);
+    inventoryRevision.value++;
     isInitialized = true;
   }
 
@@ -270,9 +287,10 @@ class JengaDB {
     return shouldResumeSavedSession;
   }
 
-  Future<bool> saveItems() async {
+  Future<bool> saveItems({bool waitForSync = false}) async {
     try {
       await _persistItemsLocally();
+      inventoryRevision.value++;
     } catch (_) {
       return false;
     }
@@ -283,24 +301,28 @@ class JengaDB {
       final syncKey = _stockSyncKey(owner);
       try {
         final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(syncKey, true);
+        hasUnsyncedStock.value = true;
         if (api.authToken == null ||
             api.sessionEmail != currentUser?.email.toLowerCase()) {
-          await prefs.setBool(syncKey, true);
           return true;
         }
-        final synced = await _replaceAccountStock(
-          api,
-          sourceDeviceToken: FirebasePushService.instance.currentToken,
-        );
-        await prefs.setBool(syncKey, !synced);
-      } catch (_) {
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(syncKey, true);
-        } catch (_) {}
-      }
+        if (waitForSync) {
+          await syncStockWithServer();
+        } else {
+          _scheduleBackgroundStockSync();
+        }
+      } catch (_) {}
     }
     return true;
+  }
+
+  void _scheduleBackgroundStockSync() {
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = Timer(const Duration(milliseconds: 250), () {
+      _backgroundSyncTimer = null;
+      unawaited(syncStockWithServer().catchError((_) => false));
+    });
   }
 
   Future<bool> _replaceAccountStock(
@@ -390,15 +412,18 @@ class JengaDB {
       inventoryOwnerId = ownerId;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('jengabiz_inventory_owner_id', ownerId);
+      await JengaCacheService.instance.set('items:$ownerId', jsonList);
       await _saveInventorySnapshot(ownerId, items);
+    } else {
+      await JengaCacheService.instance.set('items:all', jsonList);
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/jengabiz_inventory.json');
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(jsonEncode(jsonList), flush: true);
+      if (await file.exists()) await file.delete();
+      await temporary.rename(file.path);
     }
-    await JengaCacheService.instance.set('items:all', jsonList);
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/jengabiz_inventory.json');
-    final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(jsonEncode(jsonList), flush: true);
-    await temporary.rename(file.path);
-    await _refreshStockWidget();
+    unawaited(_refreshStockWidget());
   }
 
   Future<File> _inventorySnapshotFile(String ownerId) async {
@@ -448,8 +473,13 @@ class JengaDB {
     currentUser = user;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('current_user_id', user.id);
+    hasUnsyncedStock.value = prefs.getBool(_stockSyncKey(user.id)) ?? false;
     await _persistItemsLocally();
     await NotificationCenterService.instance.setAccountScope(user.email);
+    unawaited(ProfileImageCacheService.instance
+        .read(user.id)
+        .catchError((_) => null));
+    inventoryRevision.value++;
   }
 
   Future<void> _resumeSavedSession() async {
@@ -506,7 +536,17 @@ class JengaDB {
     final ownerId = currentUser?.id;
     if (ownerId == null) return false;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_stockSyncKey(ownerId)) ?? false;
+    final pending = prefs.getBool(_stockSyncKey(ownerId)) ?? false;
+    hasUnsyncedStock.value = pending;
+    return pending;
+  }
+
+  Future<bool> hasPendingProfileImageSync() async {
+    final api = JengaApiService.instance;
+    final ownerId =
+        (currentUser?.id ?? api.sessionEmail ?? '').trim().toLowerCase();
+    if (ownerId.isEmpty) return false;
+    return ProfileImageCacheService.instance.hasPendingUpload(ownerId);
   }
 
   /// Upload any locally queued profile photo once an authenticated session is online.
@@ -569,6 +609,8 @@ class JengaDB {
           inventoryOwnerId = currentUser!.id;
           await _persistItemsLocally();
           await prefs.setBool(syncKey, false);
+          hasUnsyncedStock.value = false;
+          inventoryRevision.value++;
           return true;
         }
       }
@@ -578,6 +620,9 @@ class JengaDB {
       );
       if (!saved) return false;
       await prefs.setBool(syncKey, false);
+      hasUnsyncedStock.value = false;
+      inventoryRevision.value++;
+      return true;
     }
     final remoteItems = await api.fetchAccountStock();
     if (remoteItems == null) return false;
@@ -591,6 +636,7 @@ class JengaDB {
       );
       if (saved) {
         await prefs.setBool(syncKey, false);
+        hasUnsyncedStock.value = false;
       }
       return saved;
     }
@@ -599,6 +645,8 @@ class JengaDB {
     inventoryOwnerId = currentUser?.id;
     await _persistItemsLocally();
     await prefs.setBool(syncKey, false);
+    hasUnsyncedStock.value = false;
+    inventoryRevision.value++;
     return true;
   }
 
@@ -824,9 +872,13 @@ class JengaDB {
   }
 
   Future<void> logout() async {
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = null;
     currentUser = null;
     shouldResumeSavedSession = false;
+    hasUnsyncedStock.value = false;
     ProfileImageCacheService.instance.clearMemory();
+    StockImageCacheService.instance.clearMemory();
     final deviceToken = FirebasePushService.instance.currentToken;
     final apiLogout =
         JengaApiService.instance.logoutAccount(deviceToken: deviceToken);
@@ -837,17 +889,23 @@ class JengaDB {
       // The in-memory account and secure API session are already cleared.
     }
     await NotificationCenterService.instance.setAccountScope(null);
+    inventoryRevision.value++;
     await apiLogout;
   }
 
   Future<void> clearRejectedSession() async {
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = null;
     await JengaApiService.instance.clearSession();
     currentUser = null;
     shouldResumeSavedSession = false;
+    hasUnsyncedStock.value = false;
     ProfileImageCacheService.instance.clearMemory();
+    StockImageCacheService.instance.clearMemory();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('current_user_id');
     await NotificationCenterService.instance.setAccountScope(null);
+    inventoryRevision.value++;
   }
 
   Future<bool> adjustStock(String itemId, int delta) async {

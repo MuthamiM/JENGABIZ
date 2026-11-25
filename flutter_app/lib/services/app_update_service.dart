@@ -168,7 +168,10 @@ class AppUpdateService {
       }
 
       final sink = file.openWrite();
+      final digestSink = _SingleDigestSink();
+      final hasher = sha256.startChunkedConversion(digestSink);
       var received = 0;
+      var lastReportedProgress = 0.0;
       try {
         await for (final chunk
             in response.timeout(const Duration(seconds: 30))) {
@@ -177,12 +180,18 @@ class AppUpdateService {
             throw const AppUpdateException('The update file is too large.');
           }
           sink.add(chunk);
+          hasher.add(chunk);
           if (response.contentLength > 0) {
-            onProgress(received / response.contentLength);
+            final progress = (received / response.contentLength).clamp(0.0, 1.0);
+            if (progress - lastReportedProgress >= 0.01 || progress >= 1.0) {
+              lastReportedProgress = progress;
+              onProgress(progress);
+            }
           }
         }
         await sink.flush();
       } finally {
+        hasher.close();
         await sink.close();
       }
 
@@ -190,8 +199,7 @@ class AppUpdateService {
         throw const AppUpdateException('The update file was empty.');
       }
       onProgress(1);
-      final actualChecksum =
-          sha256.convert(await file.readAsBytes()).toString();
+      final actualChecksum = digestSink.digest.toString();
       if (actualChecksum != release.sha256) {
         throw const AppUpdateException(
           'The downloaded update did not pass its security check. Please try again.',
@@ -216,6 +224,16 @@ class AppUpdateService {
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '');
   }
+}
+
+class _SingleDigestSink implements Sink<Digest> {
+  late Digest digest;
+
+  @override
+  void add(Digest data) => digest = data;
+
+  @override
+  void close() {}
 }
 
 class AppUpdateException implements Exception {

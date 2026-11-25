@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -26,13 +27,19 @@ class CachedStockImage extends StatefulWidget {
 }
 
 class _CachedStockImageState extends State<CachedStockImage> {
+  static final Map<String, DateTime> _recentFailureById = {};
+  static const Duration _retryCooldown = Duration(seconds: 45);
+
   File? _cachedFile;
+  Uint8List? _memoryBytes;
   int _loadGeneration = 0;
   bool _finishedInitialLoad = false;
 
   @override
   void initState() {
     super.initState();
+    _primeMemory();
+    JengaApiService.instance.isOnline.addListener(_onConnectivityChanged);
     _loadRemoteImage();
   }
 
@@ -42,9 +49,33 @@ class _CachedStockImageState extends State<CachedStockImage> {
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.ownerId != widget.ownerId) {
       _cachedFile = null;
+      _memoryBytes = null;
       _finishedInitialLoad = false;
+      _primeMemory();
       _loadRemoteImage();
     }
+  }
+
+  @override
+  void dispose() {
+    JengaApiService.instance.isOnline.removeListener(_onConnectivityChanged);
+    super.dispose();
+  }
+
+  void _onConnectivityChanged() {
+    if (JengaApiService.instance.isOnline.value &&
+        _cachedFile == null &&
+        _memoryBytes == null) {
+      _recentFailureById.clear();
+      _loadRemoteImage();
+    }
+  }
+
+  void _primeMemory() {
+    final ownerId = widget.ownerId;
+    final itemId = _itemId;
+    if (ownerId == null || itemId == null) return;
+    _memoryBytes = StockImageCacheService.instance.peekMemory(ownerId, itemId);
   }
 
   String? get _itemId {
@@ -63,23 +94,40 @@ class _CachedStockImageState extends State<CachedStockImage> {
       final service = StockImageCacheService.instance;
       final file = await service.getImage(ownerId, itemId);
       if (!mounted || generation != _loadGeneration) return;
-      if (file != null) setState(() => _cachedFile = file);
+      if (file != null) {
+        setState(() {
+          _cachedFile = file;
+          _memoryBytes = service.peekMemory(ownerId, itemId) ?? _memoryBytes;
+        });
+      }
 
       final isFresh = file != null &&
           DateTime.now().difference(await file.lastModified()) <
               const Duration(hours: 6);
       if (isFresh) return;
 
+      final failedAt = _recentFailureById[itemId];
+      if (failedAt != null &&
+          DateTime.now().difference(failedAt) < _retryCooldown) {
+        return;
+      }
+
       final bytes = await JengaApiService.instance.fetchStockImage(itemId);
-      if (bytes == null ||
-          bytes.isEmpty ||
-          !mounted ||
-          generation != _loadGeneration) {
+      if (bytes == null || bytes.isEmpty) {
+        _recentFailureById[itemId] = DateTime.now();
+        return;
+      }
+      _recentFailureById.remove(itemId);
+      if (!mounted || generation != _loadGeneration) {
+        await service.saveImage(ownerId, itemId, bytes);
         return;
       }
       final saved = await service.saveImage(ownerId, itemId, bytes);
       if (mounted && generation == _loadGeneration) {
-        setState(() => _cachedFile = saved);
+        setState(() {
+          _cachedFile = saved;
+          _memoryBytes = service.peekMemory(ownerId, itemId) ?? bytes;
+        });
       }
     } catch (_) {
       // Keep an existing cached photo available when the shop is offline.
@@ -121,6 +169,19 @@ class _CachedStockImageState extends State<CachedStockImage> {
     }
     if (url.startsWith('stock-image:')) {
       if (widget.ownerId == null) return placeholder();
+      final memBytes = _memoryBytes;
+      if (memBytes != null) {
+        return Image.memory(
+          memBytes,
+          width: widget.width,
+          height: widget.height,
+          cacheWidth: (widget.width * 2).round(),
+          cacheHeight: (widget.height * 2).round(),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => placeholder(),
+        );
+      }
       final file = _cachedFile;
       if (file != null) {
         return Image.file(

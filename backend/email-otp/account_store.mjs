@@ -141,6 +141,18 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
     );
     CREATE INDEX IF NOT EXISTS profile_collection_account_idx
       ON account_profile_image_collection(account_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS account_security_captures (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+      image_data BLOB NOT NULL,
+      storage_path TEXT,
+      seq INTEGER NOT NULL DEFAULT 1,
+      captured_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS security_captures_account_idx
+      ON account_security_captures(account_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS notification_devices (
       token TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -1380,6 +1392,119 @@ export function createAccountStore(db, {
     return changes;
   }
 
+  function saveSecurityCapture(
+    accountId,
+    mimeType,
+    imageData,
+    seq = 1,
+    capturedAt = now(),
+  ) {
+    if (!SAFE_ACCOUNT_ID.test(accountId) ||
+        !Object.hasOwn(IMAGE_EXTENSIONS, mimeType) ||
+        !Buffer.isBuffer(imageData) ||
+        imageData.length === 0 ||
+        imageData.length > MAX_PROFILE_IMAGE_BYTES) {
+      return null;
+    }
+    const account = db.prepare('SELECT 1 AS found FROM accounts WHERE id = ?').get(accountId);
+    if (!account) return null;
+
+    const entryId = randomUUID();
+    const createdAt = now();
+    const safeSeq = Math.max(1, Math.min(10, Number(seq) || 1));
+
+    if (resolvedUploadsDir) {
+      const isoStamp = new Date(capturedAt)
+        .toISOString()
+        .replace(/[-:.]/g, '')
+        .replace('T', '-')
+        .slice(0, 19);
+      const shortId = entryId.replace(/-/g, '').slice(0, 8);
+      const fileName = `security-${isoStamp}-${safeSeq}-${shortId}.${IMAGE_EXTENSIONS[mimeType]}`;
+      const relativePath = join(accountId, fileName);
+      const accountDir = safeUploadPath(accountId);
+      const targetPath = safeUploadPath(relativePath);
+      if (!accountDir || !targetPath) return null;
+
+      mkdirSync(resolvedUploadsDir, { recursive: true, mode: 0o755 });
+      applyPermissions(resolvedUploadsDir, 0o755);
+      mkdirSync(accountDir, { recursive: true, mode: 0o755 });
+      applyPermissions(accountDir, 0o755);
+
+      const tempPath = join(accountDir, `.tmp-${randomUUID()}`);
+      try {
+        writeFileSync(tempPath, imageData);
+        applyPermissions(tempPath, 0o644);
+        renameSync(tempPath, targetPath);
+      } catch (error) {
+        try {
+          if (existsSync(tempPath)) unlinkSync(tempPath);
+        } catch {}
+        throw error;
+      }
+
+      try {
+        db.prepare(`
+          INSERT INTO account_security_captures
+            (id, account_id, mime_type, image_data, storage_path, seq, captured_at, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(entryId, accountId, mimeType, Buffer.alloc(0), relativePath, safeSeq, capturedAt, createdAt);
+      } catch (error) {
+        try {
+          if (existsSync(targetPath)) unlinkSync(targetPath);
+        } catch {}
+        throw error;
+      }
+      return {
+        id: entryId,
+        storage: 'teledrive',
+        storagePath: relativePath,
+        fileName,
+        seq: safeSeq,
+        capturedAt,
+      };
+    }
+
+    db.prepare(`
+      INSERT INTO account_security_captures
+        (id, account_id, mime_type, image_data, storage_path, seq, captured_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(entryId, accountId, mimeType, imageData, null, safeSeq, capturedAt, createdAt);
+
+    return {
+      id: entryId,
+      storage: 'database',
+      storagePath: null,
+      fileName: null,
+      seq: safeSeq,
+      capturedAt,
+    };
+  }
+
+  function listSecurityCaptures(accountId, limit = 20) {
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    return db.prepare(`
+      SELECT
+        id,
+        mime_type AS mimeType,
+        storage_path AS storagePath,
+        seq,
+        captured_at AS capturedAt,
+        created_at AS createdAt
+      FROM account_security_captures
+      WHERE account_id = ?
+      ORDER BY created_at DESC, seq ASC
+      LIMIT ?
+    `).all(accountId, safeLimit).map((row) => ({
+      id: row.id,
+      mimeType: row.mimeType,
+      storagePath: row.storagePath ?? null,
+      seq: Number(row.seq),
+      capturedAt: Number(row.capturedAt),
+      createdAt: Number(row.createdAt),
+    }));
+  }
+
   function saveNotificationDevice(
     accountId,
     token,
@@ -1472,6 +1597,8 @@ export function createAccountStore(db, {
     getProfileImage,
     listProfileImageCollection,
     removeProfileImage,
+    saveSecurityCapture,
+    listSecurityCaptures,
     saveNotificationDevice,
     removeNotificationDevice,
     listNotificationDevices,
