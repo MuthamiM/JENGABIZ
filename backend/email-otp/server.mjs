@@ -16,8 +16,8 @@ const MAX_VERIFY_ATTEMPTS = 5;
 const MAX_SENDS_PER_IP_PER_HOUR = 20;
 const MAX_BODY_BYTES = 4096;
 const MAX_STOCK_BODY_BYTES = 4 * 1024 * 1024;
-const MAX_STOCK_IMAGE_BODY_BYTES = 1400 * 1024;
-const MAX_STOCK_IMAGE_BYTES = 1024 * 1024;
+const MAX_IMAGE_BODY_BYTES = 1400 * 1024;
+const MAX_IMAGE_BYTES = 1024 * 1024;
 const MAX_LOGIN_FAILURES = 10;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const SUPPORT_REQUEST_WINDOW_MS = 15 * 60 * 1000;
@@ -81,7 +81,7 @@ async function readJson(request, limit = MAX_BODY_BYTES) {
   return JSON.parse(body || '{}');
 }
 
-function parseStockImage(payload) {
+function parseUploadedImage(payload) {
   const mimeType = payload?.mimeType;
   const encoded = payload?.imageBase64;
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType) ||
@@ -91,7 +91,7 @@ function parseStockImage(payload) {
     return null;
   }
   const imageData = Buffer.from(encoded, 'base64');
-  if (!imageData.length || imageData.length > MAX_STOCK_IMAGE_BYTES) return null;
+  if (!imageData.length || imageData.length > MAX_IMAGE_BYTES) return null;
   const isJpeg = mimeType === 'image/jpeg' && imageData.length >= 3 &&
     imageData[0] === 0xff && imageData[1] === 0xd8 && imageData[2] === 0xff;
   const isPng = mimeType === 'image/png' && imageData.length >= 8 &&
@@ -148,6 +148,9 @@ export function createEmailOtpHandler({
   adminPasswordHash = process.env.JENGABIZ_ADMIN_PASSWORD_HASH || '',
   phoneEncryptionKey = process.env.JENGABIZ_PHONE_ENCRYPTION_KEY,
   phoneHashKey = process.env.JENGABIZ_PHONE_HASH_KEY,
+  profileUploadsDir = process.env.JENGABIZ_PROFILE_UPLOADS_DIR || '',
+  profileUploadsUid = process.env.JENGABIZ_PROFILE_UPLOADS_UID,
+  profileUploadsGid = process.env.JENGABIZ_PROFILE_UPLOADS_GID,
   database = new DatabaseSync(':memory:'),
 } = {}) {
   const accounts = createAccountStore(database, {
@@ -158,6 +161,9 @@ export function createEmailOtpHandler({
     adminPasswordHash,
     phoneEncryptionKey,
     phoneHashKey,
+    profileUploadsDir,
+    profileUploadsUid,
+    profileUploadsGid,
   });
   const challenges = new Map();
   const sendsByIp = new Map();
@@ -333,7 +339,7 @@ export function createEmailOtpHandler({
       const allowedMethod = stockImageMatch || profileImageMatch
         ? (stockImageMatch
           ? ['GET', 'PUT'].includes(request.method)
-          : ['GET', 'DELETE'].includes(request.method))
+          : ['GET', 'PUT', 'DELETE'].includes(request.method))
         : path === ADMIN_LOGIN_PATH || path === ADMIN_LOGOUT_PATH
           ? request.method === 'POST'
         : adminStatusMatch
@@ -360,8 +366,8 @@ export function createEmailOtpHandler({
         try {
           const bodyLimit = path === '/email-auth/stock/items'
             ? MAX_STOCK_BODY_BYTES
-            : stockImageMatch
-              ? MAX_STOCK_IMAGE_BODY_BYTES
+            : (stockImageMatch || (profileImageMatch && request.method === 'PUT'))
+              ? MAX_IMAGE_BODY_BYTES
               : MAX_BODY_BYTES;
           payload = await readJson(request, bodyLimit);
         } catch (error) {
@@ -665,7 +671,7 @@ export function createEmailOtpHandler({
             response.end(imageData);
             return;
           }
-          const uploadedImage = parseStockImage(payload);
+          const uploadedImage = parseUploadedImage(payload);
           if (!uploadedImage) {
             return json(response, 400, { success: false, message: 'Choose a valid JPEG, PNG, or WebP image up to 1 MB.' });
           }
@@ -706,6 +712,33 @@ export function createEmailOtpHandler({
             });
             response.end(imageData);
             return;
+          }
+          if (request.method === 'PUT') {
+            const imageType = typeof payload?.imageType === 'string'
+              ? payload.imageType.trim().toLowerCase()
+              : '';
+            if (!['personal', 'shop'].includes(imageType)) {
+              return json(response, 400, { success: false, message: 'Choose Personal photo or Shop photo.' });
+            }
+            const uploadedImage = parseUploadedImage(payload);
+            if (!uploadedImage) {
+              return json(response, 400, { success: false, message: 'Choose a valid JPEG, PNG, or WebP image up to 1 MB.' });
+            }
+            const saved = accounts.saveProfileImage(
+              session.id,
+              imageType,
+              uploadedImage.mimeType,
+              uploadedImage.imageData,
+              now(),
+            );
+            if (!saved) {
+              return json(response, 404, { success: false, message: 'Account was not found.' });
+            }
+            return json(response, 200, {
+              success: true,
+              imageType: saved.imageType,
+              storage: saved.storage,
+            });
           }
           const removed = accounts.removeProfileImage(session.id);
           return json(response, 200, { success: true, removed: removed > 0 });

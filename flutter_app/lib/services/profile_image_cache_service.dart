@@ -9,17 +9,51 @@ class ProfileImageCacheEntry {
     required this.file,
     required this.imageType,
     required this.pendingUpload,
+    this.mimeType,
   });
 
   final File file;
   final String imageType;
   final bool pendingUpload;
+  final String? mimeType;
 }
 
 class ProfileImageCacheService {
   ProfileImageCacheService._();
 
   static final instance = ProfileImageCacheService._();
+
+  static String? detectMimeType(List<int> bytes) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[2] == 0xff) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 137 &&
+        bytes[1] == 80 &&
+        bytes[2] == 78 &&
+        bytes[3] == 71 &&
+        bytes[4] == 13 &&
+        bytes[5] == 10 &&
+        bytes[6] == 26 &&
+        bytes[7] == 10) {
+      return 'image/png';
+    }
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return 'image/webp';
+    }
+    return null;
+  }
 
   Future<(File image, File metadata)> _filesFor(String ownerId) async {
     final directory = await getApplicationSupportDirectory();
@@ -47,10 +81,17 @@ class ProfileImageCacheService {
           !const {'personal', 'shop'}.contains(value['type'])) {
         return null;
       }
+      final storedMime = value['mimeType'];
+      final mimeType = storedMime is String &&
+              const {'image/jpeg', 'image/png', 'image/webp'}
+                  .contains(storedMime)
+          ? storedMime
+          : detectMimeType(await image.readAsBytes());
       return ProfileImageCacheEntry(
         file: image,
         imageType: value['type'] as String,
         pendingUpload: value['pending'] == true,
+        mimeType: mimeType,
       );
     } catch (_) {
       return null;
@@ -61,6 +102,8 @@ class ProfileImageCacheService {
     String ownerId, {
     required List<int> bytes,
     required String imageType,
+    String? mimeType,
+    bool pendingUpload = false,
   }) async {
     if (bytes.isEmpty || bytes.length > 1024 * 1024) {
       throw ArgumentError.value(
@@ -70,12 +113,17 @@ class ProfileImageCacheService {
       throw ArgumentError.value(
           imageType, 'imageType', 'Unsupported photo type.');
     }
+    final resolvedMime = mimeType ?? detectMimeType(bytes);
     final (image, metadata) = await _filesFor(ownerId);
     final temporaryImage = File('${image.path}.tmp');
     final temporaryMetadata = File('${metadata.path}.tmp');
     await temporaryImage.writeAsBytes(bytes, flush: true);
     await temporaryMetadata.writeAsString(
-      jsonEncode({'type': imageType, 'pending': false}),
+      jsonEncode({
+        'type': imageType,
+        'pending': pendingUpload,
+        if (resolvedMime != null) 'mimeType': resolvedMime,
+      }),
       flush: true,
     );
     if (await image.exists()) await image.delete();
@@ -85,7 +133,8 @@ class ProfileImageCacheService {
     return ProfileImageCacheEntry(
       file: image,
       imageType: imageType,
-      pendingUpload: false,
+      pendingUpload: pendingUpload,
+      mimeType: resolvedMime,
     );
   }
 

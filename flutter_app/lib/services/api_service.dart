@@ -20,10 +20,25 @@ class JengaApiResponse {
 }
 
 class JengaProfileImage {
-  const JengaProfileImage({required this.imageType, required this.bytes});
+  const JengaProfileImage({
+    required this.imageType,
+    required this.bytes,
+    this.mimeType,
+  });
 
   final String imageType;
   final Uint8List bytes;
+  final String? mimeType;
+}
+
+class JengaProfileImageFetchResult {
+  const JengaProfileImageFetchResult({
+    this.image,
+    this.notFound = false,
+  });
+
+  final JengaProfileImage? image;
+  final bool notFound;
 }
 
 class JengaApiService {
@@ -452,6 +467,22 @@ class JengaApiService {
     }
   }
 
+  Future<JengaApiResponse?> uploadProfileImage({
+    required String imageType,
+    required String mimeType,
+    required Uint8List imageData,
+  }) =>
+      _requestJson(
+        'PUT',
+        '/email-auth/profile/image',
+        payload: {
+          'imageType': imageType,
+          'mimeType': mimeType,
+          'imageBase64': base64Encode(imageData),
+        },
+        timeout: const Duration(seconds: 20),
+      );
+
   Future<bool> removeProfileImage() async {
     final response = await _requestJson(
       'DELETE',
@@ -461,9 +492,9 @@ class JengaApiService {
     return response?.succeeded == true;
   }
 
-  Future<JengaProfileImage?> fetchProfileImage() async {
+  Future<JengaProfileImageFetchResult> fetchProfileImageStatus() async {
     final client = _client;
-    if (client == null) return null;
+    if (client == null) return const JengaProfileImageFetchResult();
     try {
       final request = await client.getUrl(
         Uri.parse('$baseUrl/email-auth/profile/image'),
@@ -476,17 +507,21 @@ class JengaApiService {
       }
       final response =
           await request.close().timeout(const Duration(seconds: 10));
+      if (response.statusCode == HttpStatus.notFound) {
+        await response.drain<void>();
+        return const JengaProfileImageFetchResult(notFound: true);
+      }
       if (response.statusCode != HttpStatus.ok ||
           response.contentLength > 1024 * 1024) {
         await response.drain<void>();
-        return null;
+        return const JengaProfileImageFetchResult();
       }
       final imageType = response.headers.value('x-profile-image-type');
       final mimeType = response.headers.contentType?.mimeType;
       if (!const {'personal', 'shop'}.contains(imageType) ||
           !const {'image/jpeg', 'image/png', 'image/webp'}.contains(mimeType)) {
         await response.drain<void>();
-        return null;
+        return const JengaProfileImageFetchResult();
       }
       final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
         if (all.length + chunk.length > 1024 * 1024) {
@@ -495,14 +530,23 @@ class JengaApiService {
         all.addAll(chunk);
         return all;
       }).timeout(const Duration(seconds: 10));
-      return bytes.isEmpty
-          ? null
-          : JengaProfileImage(
-              imageType: imageType!, bytes: Uint8List.fromList(bytes));
+      if (bytes.isEmpty) {
+        return const JengaProfileImageFetchResult();
+      }
+      return JengaProfileImageFetchResult(
+        image: JengaProfileImage(
+          imageType: imageType!,
+          mimeType: mimeType,
+          bytes: Uint8List.fromList(bytes),
+        ),
+      );
     } catch (_) {
-      return null;
+      return const JengaProfileImageFetchResult();
     }
   }
+
+  Future<JengaProfileImage?> fetchProfileImage() async =>
+      (await fetchProfileImageStatus()).image;
 
   Future<void> logoutAccount({String? deviceToken}) async {
     final token = authToken;

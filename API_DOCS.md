@@ -151,6 +151,9 @@ Both routes require `Authorization: Bearer <sessionToken>`. GET returns only the
 #### `GET /email-auth/stock/images/:itemId` and `PUT /email-auth/stock/images/:itemId`
 Both routes require the signed-in account's bearer token. PUT accepts a base64 JPEG, PNG, or WebP image up to 1 MB for an existing stock item; image bytes are stored in the account-scoped SQLite database, with a 32 MB image-storage limit per shop. GET streams the private image and disables caching at shared proxies. The stock item stores only the `stock-image:<itemId>` reference, never the image payload.
 
+#### `GET /email-auth/profile/image`, `PUT /email-auth/profile/image`, and `DELETE /email-auth/profile/image`
+All three routes require the signed-in account's bearer token. PUT accepts `imageType` (`personal` or `shop`), `mimeType` (`image/jpeg`, `image/png`, or `image/webp`), and `imageBase64` (up to 1 MB decoded). When `JENGABIZ_PROFILE_UPLOADS_DIR` is configured (mounted to the TeleDrive backup folder in Docker), files are saved as `<accountId>/<imageType>.<ext>` while `account_profile_images` stores the account index (`storage_path`, `image_type`, `mime_type`). GET streams the photo with `x-profile-image-type` and `Cache-Control: private, no-store`. DELETE removes the photo record and its TeleDrive file.
+
 Each stock record stores its name, category, SKU, selling and cost prices, remaining quantity, units sold, low-stock threshold, and image URL in the account SQLite database. The Flutter app also keeps an account-scoped offline copy and syncs the full inventory when connected.
 
 #### `POST /email-auth/notifications/device` and `DELETE /email-auth/notifications/device`

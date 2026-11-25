@@ -12,6 +12,7 @@ import 'cache_service.dart';
 import 'firebase_push_service.dart';
 import 'notification_center_service.dart';
 import 'password_hasher.dart';
+import 'profile_image_cache_service.dart';
 import 'stock_image_cache_service.dart';
 
 class JengaUser {
@@ -468,6 +469,7 @@ class JengaDB {
       currentUser = await persistAuthenticatedAccount(profile: profile);
       shouldResumeSavedSession = true;
       unawaited(syncStockWithServer().catchError((_) => false));
+      unawaited(syncPendingProfileImage().catchError((_) => false));
       return;
     }
 
@@ -505,6 +507,47 @@ class JengaDB {
     if (ownerId == null) return false;
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_stockSyncKey(ownerId)) ?? false;
+  }
+
+  /// Upload any locally queued profile photo once an authenticated session is online.
+  Future<bool> syncPendingProfileImage() async {
+    final api = JengaApiService.instance;
+    final ownerId =
+        (currentUser?.id ?? api.sessionEmail ?? '').trim().toLowerCase();
+    if (ownerId.isEmpty ||
+        api.authToken == null ||
+        api.sessionEmail != currentUser?.email.toLowerCase()) {
+      return false;
+    }
+    try {
+      final cached = await ProfileImageCacheService.instance.read(ownerId);
+      if (cached == null || !cached.pendingUpload) return true;
+      final bytes = await cached.file.readAsBytes();
+      final mimeType =
+          cached.mimeType ?? ProfileImageCacheService.detectMimeType(bytes);
+      if (bytes.isEmpty || bytes.length > 1024 * 1024 || mimeType == null) {
+        await ProfileImageCacheService.instance.remove(ownerId);
+        return false;
+      }
+      final response = await api.uploadProfileImage(
+        imageType: cached.imageType,
+        mimeType: mimeType,
+        imageData: bytes,
+      );
+      if (response?.succeeded == true) {
+        await ProfileImageCacheService.instance.save(
+          ownerId,
+          bytes: bytes,
+          imageType: cached.imageType,
+          mimeType: mimeType,
+          pendingUpload: false,
+        );
+        return true;
+      }
+    } catch (_) {
+      // Ignore when local storage is unavailable in non-device environments.
+    }
+    return false;
   }
 
   Future<bool> _performStockSync() async {

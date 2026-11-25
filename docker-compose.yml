@@ -78,10 +78,14 @@ services:
       - JENGABIZ_ADMIN_PASSWORD_HASH=${JENGABIZ_ADMIN_PASSWORD_HASH:-}
       - JENGABIZ_PHONE_ENCRYPTION_KEY=${JENGABIZ_PHONE_ENCRYPTION_KEY:-}
       - JENGABIZ_PHONE_HASH_KEY=${JENGABIZ_PHONE_HASH_KEY:-}
+      - JENGABIZ_PROFILE_UPLOADS_DIR=${JENGABIZ_PROFILE_UPLOADS_DIR:-/teledrive-profiles}
+      - JENGABIZ_PROFILE_UPLOADS_UID=${JENGABIZ_PROFILE_UPLOADS_UID:-1000}
+      - JENGABIZ_PROFILE_UPLOADS_GID=${JENGABIZ_PROFILE_UPLOADS_GID:-1000}
       - FIREBASE_SERVICE_ACCOUNT_FILE=/run/secrets/jengabiz-fcm-service-account.json
     volumes:
       - ./backend/email-otp:/app:ro
       - jengabiz_account_data:/data
+      - ${JENGABIZ_TELEDRIVE_PROFILES_DIR:-/home/cantroll/TeleDrive/JengaBizProfiles}:/teledrive-profiles
       - ./deployment/secrets/jengabiz-fcm-service-account.json:/run/secrets/jengabiz-fcm-service-account.json:ro
     networks:
       - default

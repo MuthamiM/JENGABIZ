@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -168,6 +169,9 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       if (await JengaDB.instance.hasPendingStockSync()) {
         await JengaDB.instance.syncStockWithServer();
       }
+      if (JengaApiService.instance.authToken != null) {
+        unawaited(JengaDB.instance.syncPendingProfileImage().catchError((_) => false));
+      }
     } catch (_) {
       // The retry timer will try again when connectivity returns.
     }
@@ -177,6 +181,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     try {
       if (JengaApiService.instance.authToken != null) {
         await JengaDB.instance.syncStockWithServer();
+        unawaited(JengaDB.instance.syncPendingProfileImage().catchError((_) => false));
       }
     } catch (_) {
       // A failed pull leaves the account's local inventory available offline.
@@ -1765,19 +1770,25 @@ class ProfileScreen extends StatefulWidget {
       required this.onLogout,
       this.onSignInAgain,
       this.onCheckForUpdates,
-      this.referralSummaryLoader});
+      this.referralSummaryLoader,
+      this.apiService,
+      this.imagePickerOverride});
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback onLogout;
   final VoidCallback? onSignInAgain;
   final VoidCallback? onCheckForUpdates;
   final Future<JengaApiResponse?> Function()? referralSummaryLoader;
+  final JengaApiService? apiService;
+  final Future<XFile?> Function(ImageSource source)? imagePickerOverride;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const int _maxProfileImageBytes = 1024 * 1024;
+  final _imagePicker = ImagePicker();
   bool _referralExpanded = false;
   bool _referralLoading = false;
   bool _referralLocationSaving = false;
@@ -1789,15 +1800,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileImageType;
   bool _profileImageBusy = false;
 
+  JengaApiService get _api => widget.apiService ?? JengaApiService.instance;
+
   String get _profileImageOwnerId => (JengaDB.instance.currentUser?.id ??
-          JengaApiService.instance.sessionEmail ??
+          _api.sessionEmail ??
           'account')
       .trim()
       .toLowerCase();
 
   String get _referralCacheKey {
     final owner = (JengaDB.instance.currentUser?.id ??
-            JengaApiService.instance.sessionEmail ??
+            _api.sessionEmail ??
             'account')
         .trim()
         .toLowerCase();
@@ -1838,27 +1851,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfileImage() async {
     final ownerId = _profileImageOwnerId;
     final cache = ProfileImageCacheService.instance;
-    var saved = await cache.read(ownerId);
-    if (saved?.pendingUpload == true) {
-      await cache.remove(ownerId);
-      saved = null;
-    }
+    ProfileImageCacheEntry? saved;
+    try {
+      saved = await cache.read(ownerId);
+    } catch (_) {}
     if (!mounted) return;
-    final cachedImage = saved;
-    if (cachedImage != null) {
+    if (saved != null) {
       setState(() {
-        _profileImageFile = cachedImage.file;
-        _profileImageType = cachedImage.imageType;
+        _profileImageFile = saved!.file;
+        _profileImageType = saved.imageType;
       });
     }
-    if (JengaApiService.instance.authToken == null) return;
-    final remote = await JengaApiService.instance.fetchProfileImage();
-    if (!mounted || remote == null) return;
+    if (_api.authToken == null) return;
+
+    if (saved != null && saved.pendingUpload) {
+      try {
+        final bytes = await saved.file.readAsBytes();
+        final mimeType =
+            saved.mimeType ?? ProfileImageCacheService.detectMimeType(bytes);
+        if (bytes.isNotEmpty &&
+            bytes.length <= _maxProfileImageBytes &&
+            mimeType != null) {
+          final uploaded = await _api.uploadProfileImage(
+            imageType: saved.imageType,
+            mimeType: mimeType,
+            imageData: bytes,
+          );
+          if (uploaded?.succeeded == true) {
+            await cache.save(
+              ownerId,
+              bytes: bytes,
+              imageType: saved.imageType,
+              mimeType: mimeType,
+              pendingUpload: false,
+            );
+          }
+        }
+      } catch (_) {}
+      return;
+    }
+
+    final remote = await _api.fetchProfileImageStatus();
+    if (!mounted) return;
+    if (remote.notFound) {
+      if (saved != null) {
+        try {
+          await cache.remove(ownerId);
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() {
+          _profileImageFile = null;
+          _profileImageType = null;
+        });
+      }
+      return;
+    }
+    final image = remote.image;
+    if (image == null) return;
     try {
       final entry = await cache.save(
         ownerId,
-        bytes: remote.bytes,
-        imageType: remote.imageType,
+        bytes: image.bytes,
+        imageType: image.imageType,
+        mimeType: image.mimeType,
+        pendingUpload: false,
       );
       if (!mounted) return;
       setState(() {
@@ -1870,15 +1926,329 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  String? _resolvePickedMimeType(XFile file, Uint8List bytes) {
+    final detected = ProfileImageCacheService.detectMimeType(bytes);
+    if (detected != null) return detected;
+    final mime = file.mimeType?.toLowerCase();
+    if (const {'image/jpeg', 'image/png', 'image/webp'}.contains(mime)) {
+      return mime;
+    }
+    final name = file.name.toLowerCase();
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.webp')) return 'image/webp';
+    return null;
+  }
+
+  void _showPhotoMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _showProfilePhotoOptions() async {
+    if (_profileImageBusy) return;
+    var selectedType = _profileImageType == 'shop' ? 'shop' : 'personal';
+    final choice =
+        await showModalBottomSheet<({String action, String imageType, ImageSource? source})>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCDFEA),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Profile Photo',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: kInk,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Choose whether this is a Personal photo or Shop photo.',
+                  style: TextStyle(fontSize: 12.5, color: kMuted),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    for (final option in const [
+                      (
+                        type: 'personal',
+                        label: 'Personal photo',
+                        icon: Icons.person_outline_rounded,
+                      ),
+                      (
+                        type: 'shop',
+                        label: 'Shop photo',
+                        icon: Icons.storefront_outlined,
+                      ),
+                    ]) ...[
+                      if (option.type == 'shop') const SizedBox(width: 10),
+                      Expanded(
+                        child: ChoiceChip(
+                          showCheckmark: false,
+                          label: SizedBox(
+                            width: double.infinity,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(option.icon, size: 16),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    option.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          selected: selectedType == option.type,
+                          onSelected: (_) =>
+                              setSheetState(() => selectedType = option.type),
+                          selectedColor: kTintBlue,
+                          labelStyle: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: selectedType == option.type ? kBlue : kInk,
+                          ),
+                          side: BorderSide(
+                            color: selectedType == option.type
+                                ? kBlue
+                                : const Color(0xFFE1E4EF),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(
+                    backgroundColor: kTintBlue,
+                    child: Icon(Icons.photo_library_outlined, color: kBlue),
+                  ),
+                  title: const Text(
+                    'Choose from gallery',
+                    style: TextStyle(fontWeight: FontWeight.w600, color: kInk),
+                  ),
+                  subtitle: const Text(
+                    'JPEG, PNG, or WebP up to 1 MB',
+                    style: TextStyle(fontSize: 12, color: kMuted),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, (
+                    action: 'upload',
+                    imageType: selectedType,
+                    source: ImageSource.gallery,
+                  )),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(
+                    backgroundColor: kTintBlue,
+                    child: Icon(Icons.photo_camera_outlined, color: kBlue),
+                  ),
+                  title: const Text(
+                    'Take a photo',
+                    style: TextStyle(fontWeight: FontWeight.w600, color: kInk),
+                  ),
+                  subtitle: const Text(
+                    'Use your phone camera',
+                    style: TextStyle(fontSize: 12, color: kMuted),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, (
+                    action: 'upload',
+                    imageType: selectedType,
+                    source: ImageSource.camera,
+                  )),
+                ),
+                if (_profileImageFile != null)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.red.withValues(alpha: 0.1),
+                      child: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Color(0xFFC62828),
+                      ),
+                    ),
+                    title: const Text(
+                      'Remove photo',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFC62828),
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Delete current photo from your account',
+                      style: TextStyle(fontSize: 12, color: kMuted),
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, (
+                      action: 'remove',
+                      imageType: selectedType,
+                      source: null,
+                    )),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice.action == 'remove') {
+      await _removeProfileImage();
+    } else if (choice.action == 'upload' && choice.source != null) {
+      await _pickAndUploadProfileImage(choice.imageType, choice.source!);
+    }
+  }
+
+  Future<void> _pickAndUploadProfileImage(
+    String imageType,
+    ImageSource source,
+  ) async {
+    if (_profileImageBusy) return;
+    setState(() => _profileImageBusy = true);
+    try {
+      final XFile? picked;
+      try {
+        picked = widget.imagePickerOverride != null
+            ? await widget.imagePickerOverride!(source)
+            : await _imagePicker.pickImage(
+                source: source,
+                maxWidth: 1024,
+                maxHeight: 1024,
+                imageQuality: 75,
+              );
+      } catch (_) {
+        _showPhotoMessage('Could not open the photo picker. Try again.');
+        return;
+      }
+      if (!mounted || picked == null) return;
+
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      if (bytes.isEmpty || bytes.length > _maxProfileImageBytes) {
+        _showPhotoMessage('Choose a photo under 1 MB and try again.');
+        return;
+      }
+      final mimeType = _resolvePickedMimeType(picked, bytes);
+      if (mimeType == null) {
+        _showPhotoMessage('Choose a JPEG, PNG, or WebP photo.');
+        return;
+      }
+
+      final cache = ProfileImageCacheService.instance;
+      final ownerId = _profileImageOwnerId;
+      final typeLabel = imageType == 'shop' ? 'Shop photo' : 'Personal photo';
+
+      if (_api.authToken == null) {
+        final entry = await cache.save(
+          ownerId,
+          bytes: bytes,
+          imageType: imageType,
+          mimeType: mimeType,
+          pendingUpload: true,
+        );
+        if (!mounted) return;
+        setState(() {
+          _profileImageFile = entry.file;
+          _profileImageType = entry.imageType;
+        });
+        _showPhotoMessage(
+            '$typeLabel saved on this phone. Sign in online to sync it.');
+        return;
+      }
+
+      final response = await _api.uploadProfileImage(
+        imageType: imageType,
+        mimeType: mimeType,
+        imageData: bytes,
+      );
+      if (!mounted) return;
+
+      if (response?.succeeded == true) {
+        final entry = await cache.save(
+          ownerId,
+          bytes: bytes,
+          imageType: imageType,
+          mimeType: mimeType,
+          pendingUpload: false,
+        );
+        if (!mounted) return;
+        setState(() {
+          _profileImageFile = entry.file;
+          _profileImageType = entry.imageType;
+        });
+        _showPhotoMessage('$typeLabel uploaded.');
+        return;
+      }
+
+      if (response != null) {
+        if (response.statusCode == 401) {
+          _showPhotoMessage('Sign in again to upload your profile photo.');
+        } else {
+          final serverMessage = response.data['message']?.toString().trim();
+          _showPhotoMessage(
+            (serverMessage?.isNotEmpty ?? false)
+                ? serverMessage!
+                : 'Could not upload profile photo. Try again.',
+          );
+        }
+        return;
+      }
+
+      final entry = await cache.save(
+        ownerId,
+        bytes: bytes,
+        imageType: imageType,
+        mimeType: mimeType,
+        pendingUpload: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profileImageFile = entry.file;
+        _profileImageType = entry.imageType;
+      });
+      _showPhotoMessage(
+          '$typeLabel saved on this phone. It will sync when online.');
+    } finally {
+      if (mounted) setState(() => _profileImageBusy = false);
+    }
+  }
+
   Future<void> _removeProfileImage() async {
     if (_profileImageBusy || _profileImageFile == null) return;
-    final messenger = ScaffoldMessenger.of(context);
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Remove profile photo?'),
             content: const Text(
-              'This deletes the photo from your account. Photo uploads are disabled, so it cannot be restored or replaced.',
+              'This removes the photo from your account. You can upload another photo anytime.',
             ),
             actions: [
               TextButton(
@@ -1897,15 +2267,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _profileImageBusy = true);
     try {
-      final removed = await JengaApiService.instance.removeProfileImage();
-      if (!mounted) return;
-      if (!removed) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Could not reach your account. The photo was kept.'),
-          ),
-        );
-        return;
+      if (_api.authToken != null) {
+        final removed = await _api.removeProfileImage();
+        if (!mounted) return;
+        if (!removed) {
+          _showPhotoMessage('Could not reach your account. The photo was kept.');
+          return;
+        }
       }
       await ProfileImageCacheService.instance.remove(_profileImageOwnerId);
       if (!mounted) return;
@@ -1913,9 +2281,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileImageFile = null;
         _profileImageType = null;
       });
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Profile photo removed permanently.')),
-      );
+      _showPhotoMessage('Profile photo removed.');
     } finally {
       if (mounted) setState(() => _profileImageBusy = false);
     }
@@ -1923,40 +2289,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _profilePhoto() {
     final imageFile = _profileImageFile;
-    final canRemovePhoto = imageFile != null && !_profileImageBusy;
     return SizedBox(
       width: 84,
       height: 84,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            width: 84,
-            height: 84,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: kTintBlue,
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: const [BoxShadow(color: kShadow, blurRadius: 12)],
+          GestureDetector(
+            onTap: _profileImageBusy ? null : _showProfilePhotoOptions,
+            child: Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: kTintBlue,
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: const [BoxShadow(color: kShadow, blurRadius: 12)],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: imageFile != null
+                  ? Image.file(imageFile, fit: BoxFit.cover)
+                  : const Avatar(size: 84),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: imageFile != null
-                ? Image.file(imageFile, fit: BoxFit.cover)
-                : const Avatar(size: 84),
           ),
           Positioned(
             right: 0,
             bottom: 0,
             child: Tooltip(
               message: imageFile == null
-                  ? 'Profile photo upload disabled'
-                  : 'Remove existing profile photo',
+                  ? 'Upload profile photo'
+                  : 'Update or remove profile photo',
               child: IconButton(
-                onPressed: canRemovePhoto ? _removeProfileImage : null,
-                icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                onPressed:
+                    _profileImageBusy ? null : _showProfilePhotoOptions,
+                icon: _profileImageBusy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: kBlue,
+                        ),
+                      )
+                    : const Icon(Icons.camera_alt_rounded, size: 18),
                 style: IconButton.styleFrom(
                   backgroundColor: Colors.white,
-                  foregroundColor: canRemovePhoto ? kBlue : kMuted,
+                  foregroundColor: kBlue,
                   disabledForegroundColor: kMuted,
                   padding: EdgeInsets.zero,
                   visualDensity: VisualDensity.compact,

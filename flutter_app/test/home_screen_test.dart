@@ -1,9 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:duka_ledger/main.dart';
 import 'package:duka_ledger/screens/stock_screen.dart';
 import 'package:duka_ledger/services/api_service.dart';
 import 'package:duka_ledger/services/db_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -253,6 +258,140 @@ void main() {
     );
     expect(find.text('50–75 pts'), findsNothing);
     expect(find.textContaining('different county or country'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('profile screen uploads and removes shop photo', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    SharedPreferences.setMockInitialValues({});
+    final supportDir = Directory.systemTemp.createTempSync('jengabiz-profile-');
+    addTearDown(() {
+      if (supportDir.existsSync()) supportDir.deleteSync(recursive: true);
+    });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (call) async => supportDir.path,
+    );
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('plugins.flutter.io/path_provider'),
+        null,
+      );
+    });
+
+    final requests = <Map<String, Object?>>[];
+    final api = JengaApiService.forTestingRequests((method, uri, payload) async {
+      requests.add({
+        'method': method,
+        'path': uri.path,
+        'payload': Map<String, dynamic>.from(payload),
+      });
+      return const JengaApiResponse(200, {
+        'success': true,
+        'imageType': 'shop',
+        'storage': 'teledrive',
+      });
+    });
+    api.configure(
+      url: 'https://jengabiz-api.mftechnologies.org',
+      token: 'session-token',
+    );
+    api.sessionEmail = 'shop@example.com';
+
+    // Valid minimal 1x1 transparent PNG so Image.file decodes without error.
+    final samplePng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+
+    final db = JengaDB.instance;
+    db.currentUser = JengaUser(
+      id: 'acc_profile_test',
+      name: 'Shop Owner',
+      shopName: 'TeleDrive Shop',
+      phone: '',
+      email: 'shop@example.com',
+      createdAt: DateTime.now().toIso8601String(),
+    );
+    db.items = [];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileScreen(
+            go: (_) {},
+            unread: 0,
+            onLogout: () {},
+            apiService: api,
+            imagePickerOverride: (_) async => XFile.fromData(
+              samplePng,
+              mimeType: 'image/png',
+              name: 'shop.png',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Shop photo'), findsNothing);
+    await tester.tap(find.byIcon(Icons.camera_alt_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Profile Photo'), findsOneWidget);
+    expect(find.text('Personal photo'), findsOneWidget);
+    expect(find.text('Shop photo'), findsOneWidget);
+
+    await tester.tap(find.text('Shop photo'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose from gallery'));
+    for (var i = 0;
+        i < 20 && find.text('Shop photo uploaded.').evaluate().isEmpty;
+        i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Shop photo uploaded.'), findsOneWidget);
+    expect(find.text('Shop photo'), findsOneWidget);
+    final putRequests = requests.where((r) => r['method'] == 'PUT').toList();
+    expect(putRequests, hasLength(1));
+    expect(putRequests.first['path'], '/email-auth/profile/image');
+    final sentPayload = putRequests.first['payload'] as Map<String, dynamic>;
+    expect(sentPayload['imageType'], 'shop');
+    expect(sentPayload['mimeType'], 'image/png');
+    expect(sentPayload['imageBase64'], base64Encode(samplePng));
+
+    // Reopen sheet to remove the uploaded photo.
+    await tester.tap(find.byIcon(Icons.camera_alt_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove photo'), findsOneWidget);
+    await tester.tap(find.text('Remove photo'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove photo').last);
+    for (var i = 0;
+        i < 20 && find.text('Profile photo removed.').evaluate().isEmpty;
+        i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final deleteRequests =
+        requests.where((r) => r['method'] == 'DELETE').toList();
+    expect(deleteRequests, hasLength(1));
+    expect(deleteRequests.first['path'], '/email-auth/profile/image');
+    expect(find.text('Profile photo removed.'), findsOneWidget);
+    expect(find.text('Shop photo'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

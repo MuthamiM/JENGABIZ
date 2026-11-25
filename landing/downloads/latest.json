@@ -1,11 +1,11 @@
 {
-  "version_name": "1.1.11",
-  "version_code": 22,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.11/JengaBiz-1.1.11.apk",
-  "sha256": "90ebca2632df90484412dc6c7e7c6c07ac2ac0aedbba42e4f23a0206646543a5",
+  "version_name": "1.1.12",
+  "version_code": 23,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.12/JengaBiz-1.1.12.apk",
+  "sha256": "2121b7acfdadda5f392245718b7f950d4b810fb4cee780d6c5484443cfdc9bbf",
   "release_notes": [
-    "Show accurate unread notification counts without hardcoded badge numbers.",
-    "Expand notifications inline with full details, actions, and push deep linking.",
-    "Prompt for app updates after sign-in and notify older app versions via push."
+    "Enabled Personal and Shop profile photo uploads from gallery or camera.",
+    "Save uploaded profile photos directly in the TeleDrive backup folder with offline sync.",
+    "Updated in-app and website privacy and terms policies for profile photo uploads."
   ]
 }

@@ -8,6 +8,19 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
+import {
+  chmodSync,
+  chownSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 
 // Sessions stay valid until explicitly revoked. Keep the existing schema field
 // at the largest safe integer for compatibility with older server builds.
@@ -17,6 +30,13 @@ const MAX_ITEMS = 5000;
 const DUMMY_SALT = Buffer.alloc(16, 0x5a);
 const DUMMY_HASH = scryptSync('not-a-real-password', DUMMY_SALT, 64);
 const MAX_STOCK_IMAGE_STORAGE_BYTES = 32 * 1024 * 1024;
+const MAX_PROFILE_IMAGE_BYTES = 1024 * 1024;
+const SAFE_ACCOUNT_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const IMAGE_EXTENSIONS = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 const KENYAN_COUNTIES = [
   'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita-Taveta',
   'Garissa', 'Wajir', 'Mandera', 'Marsabit', 'Isiolo', 'Meru',
@@ -107,6 +127,7 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
       image_type TEXT NOT NULL CHECK (image_type IN ('personal', 'shop')),
       mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
       image_data BLOB NOT NULL,
+      storage_path TEXT,
       updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS notification_devices (
@@ -169,6 +190,13 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
   }
   if (!deviceColumns.has('last_update_push_version')) {
     db.exec('ALTER TABLE notification_devices ADD COLUMN last_update_push_version INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const profileImageColumns = new Set(
+    db.prepare('PRAGMA table_info(account_profile_images)').all().map((column) => column.name),
+  );
+  if (!profileImageColumns.has('storage_path')) {
+    db.exec('ALTER TABLE account_profile_images ADD COLUMN storage_path TEXT');
   }
 
   const missingCodes = db.prepare(
@@ -291,6 +319,12 @@ export function validateStockItems(value) {
   return items;
 }
 
+function parseOptionalOwnerId(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export function createAccountStore(db, {
   now = Date.now,
   phoneEncryptionKey = process.env.JENGABIZ_PHONE_ENCRYPTION_KEY,
@@ -299,7 +333,60 @@ export function createAccountStore(db, {
   adminName = process.env.JENGABIZ_ADMIN_NAME || 'MF Technologies Admin',
   adminPasswordSalt = process.env.JENGABIZ_ADMIN_PASSWORD_SALT,
   adminPasswordHash = process.env.JENGABIZ_ADMIN_PASSWORD_HASH,
+  profileUploadsDir = process.env.JENGABIZ_PROFILE_UPLOADS_DIR || '',
+  profileUploadsUid = process.env.JENGABIZ_PROFILE_UPLOADS_UID,
+  profileUploadsGid = process.env.JENGABIZ_PROFILE_UPLOADS_GID,
 } = {}) {
+  const resolvedUploadsDir = typeof profileUploadsDir === 'string' && profileUploadsDir.trim()
+    ? resolve(profileUploadsDir.trim())
+    : null;
+  const ownerUid = parseOptionalOwnerId(profileUploadsUid);
+  const ownerGid = parseOptionalOwnerId(profileUploadsGid);
+
+  function applyPermissions(targetPath, mode) {
+    try {
+      chmodSync(targetPath, mode);
+    } catch {}
+    if (process.getuid?.() === 0 && (ownerUid !== null || ownerGid !== null)) {
+      try {
+        chownSync(targetPath, ownerUid ?? -1, ownerGid ?? -1);
+      } catch {}
+    }
+  }
+
+  function safeUploadPath(relativePath) {
+    if (!resolvedUploadsDir || typeof relativePath !== 'string' || !relativePath) return null;
+    const candidate = resolve(resolvedUploadsDir, relativePath);
+    if (candidate !== resolvedUploadsDir && !candidate.startsWith(`${resolvedUploadsDir}${sep}`)) {
+      return null;
+    }
+    return candidate;
+  }
+
+  function cleanupAccountUploadFiles(accountId, keepFileName = null) {
+    if (!SAFE_ACCOUNT_ID.test(accountId)) return;
+    const accountDir = safeUploadPath(accountId);
+    if (!accountDir || !existsSync(accountDir)) return;
+    let remaining = 0;
+    for (const entry of readdirSync(accountDir, { withFileTypes: true })) {
+      if (!entry.isFile()) {
+        remaining += 1;
+        continue;
+      }
+      if (keepFileName && (entry.name === keepFileName || entry.name.startsWith('.tmp-'))) {
+        remaining += 1;
+        continue;
+      }
+      try {
+        unlinkSync(join(accountDir, entry.name));
+      } catch {}
+    }
+    if (remaining === 0 && !keepFileName) {
+      try {
+        rmdirSync(accountDir);
+      } catch {}
+    }
+  }
   function readKey(value) {
     if (typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)) {
       return Buffer.from(value, 'hex');
@@ -1059,17 +1146,143 @@ export function createAccountStore(db, {
     `).get(accountId, itemId) ?? null;
   }
 
+  function saveProfileImage(
+    accountId,
+    imageType,
+    mimeType,
+    imageData,
+    updatedAt = now(),
+  ) {
+    if (!SAFE_ACCOUNT_ID.test(accountId) ||
+        !['personal', 'shop'].includes(imageType) ||
+        !Object.hasOwn(IMAGE_EXTENSIONS, mimeType) ||
+        !Buffer.isBuffer(imageData) ||
+        imageData.length === 0 ||
+        imageData.length > MAX_PROFILE_IMAGE_BYTES) {
+      return null;
+    }
+    const account = db.prepare('SELECT 1 AS found FROM accounts WHERE id = ?').get(accountId);
+    if (!account) return null;
+
+    if (resolvedUploadsDir) {
+      const fileName = `${imageType}.${IMAGE_EXTENSIONS[mimeType]}`;
+      const relativePath = join(accountId, fileName);
+      const accountDir = safeUploadPath(accountId);
+      const targetPath = safeUploadPath(relativePath);
+      if (!accountDir || !targetPath) return null;
+
+      mkdirSync(resolvedUploadsDir, { recursive: true, mode: 0o755 });
+      applyPermissions(resolvedUploadsDir, 0o755);
+      mkdirSync(accountDir, { recursive: true, mode: 0o755 });
+      applyPermissions(accountDir, 0o755);
+
+      const tempPath = join(accountDir, `.tmp-${randomUUID()}`);
+      try {
+        writeFileSync(tempPath, imageData);
+        applyPermissions(tempPath, 0o644);
+        renameSync(tempPath, targetPath);
+      } catch (error) {
+        try {
+          if (existsSync(tempPath)) unlinkSync(tempPath);
+        } catch {}
+        throw error;
+      }
+
+      try {
+        db.prepare(`
+          INSERT INTO account_profile_images
+            (account_id, image_type, mime_type, image_data, storage_path, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(account_id) DO UPDATE SET
+            image_type = excluded.image_type,
+            mime_type = excluded.mime_type,
+            image_data = excluded.image_data,
+            storage_path = excluded.storage_path,
+            updated_at = excluded.updated_at
+        `).run(accountId, imageType, mimeType, Buffer.alloc(0), relativePath, updatedAt);
+      } catch (error) {
+        try {
+          if (existsSync(targetPath)) unlinkSync(targetPath);
+        } catch {}
+        throw error;
+      }
+      cleanupAccountUploadFiles(accountId, fileName);
+      return {
+        imageType,
+        mimeType,
+        storage: 'teledrive',
+        storagePath: relativePath,
+      };
+    }
+
+    db.prepare(`
+      INSERT INTO account_profile_images
+        (account_id, image_type, mime_type, image_data, storage_path, updated_at)
+      VALUES (?, ?, ?, ?, NULL, ?)
+      ON CONFLICT(account_id) DO UPDATE SET
+        image_type = excluded.image_type,
+        mime_type = excluded.mime_type,
+        image_data = excluded.image_data,
+        storage_path = excluded.storage_path,
+        updated_at = excluded.updated_at
+    `).run(accountId, imageType, mimeType, imageData, updatedAt);
+    return {
+      imageType,
+      mimeType,
+      storage: 'database',
+      storagePath: null,
+    };
+  }
+
   function getProfileImage(accountId) {
-    return db.prepare(`
-      SELECT image_type AS imageType, mime_type AS mimeType, image_data AS imageData
+    const row = db.prepare(`
+      SELECT
+        image_type AS imageType,
+        mime_type AS mimeType,
+        image_data AS imageData,
+        storage_path AS storagePath
       FROM account_profile_images WHERE account_id = ?
-    `).get(accountId) ?? null;
+    `).get(accountId);
+    if (!row) return null;
+    if (row.storagePath) {
+      const fullPath = safeUploadPath(row.storagePath);
+      if (fullPath && existsSync(fullPath)) {
+        return {
+          imageType: row.imageType,
+          mimeType: row.mimeType,
+          imageData: readFileSync(fullPath),
+          storagePath: row.storagePath,
+        };
+      }
+    }
+    if (row.imageData && row.imageData.length > 0) {
+      return {
+        imageType: row.imageType,
+        mimeType: row.mimeType,
+        imageData: Buffer.from(row.imageData),
+        storagePath: null,
+      };
+    }
+    return null;
   }
 
   function removeProfileImage(accountId) {
-    return db.prepare(
+    const row = db.prepare(
+      'SELECT storage_path AS storagePath FROM account_profile_images WHERE account_id = ?',
+    ).get(accountId);
+    const changes = db.prepare(
       'DELETE FROM account_profile_images WHERE account_id = ?',
     ).run(accountId).changes;
+    if (row?.storagePath) {
+      const fullPath = safeUploadPath(row.storagePath);
+      if (fullPath && existsSync(fullPath)) {
+        try {
+          unlinkSync(fullPath);
+        } catch {}
+      }
+    }
+    cleanupAccountUploadFiles(accountId, null);
+    return changes;
   }
 
   function saveNotificationDevice(
@@ -1160,6 +1373,7 @@ export function createAccountStore(db, {
     replaceStock,
     saveStockImage,
     getStockImage,
+    saveProfileImage,
     getProfileImage,
     removeProfileImage,
     saveNotificationDevice,

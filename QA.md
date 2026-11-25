@@ -33,7 +33,7 @@ The phone keeps an offline profile and inventory cache. The production account s
 - Keep a signed-in session idle beyond 90 days, then reconnect; the session remains valid until explicit sign-out or server revocation.
 - Revoke a session by resetting the account password, reopen Refer & Earn, and confirm the error offers Sign in again; signing in restores referral points and the invite link.
 - Create an account and sign in from a second device; confirm the same profile and stock are returned from the server database.
-- Profile always shows a camera icon. With no saved photo, it is disabled and upload remains unavailable. With an existing photo, it removes that photo after permanent-removal confirmation; after deletion the icon is disabled. Existing photos remain visible across devices until the owner removes them.
+- Profile always shows a camera icon. Tapping the avatar or camera icon opens the photo sheet to choose Personal photo or Shop photo from the gallery or camera. Uploading stores the photo in your account's TeleDrive backup folder and caches it on the device; replacing removes the previous copy, and removing deletes it from both the account and TeleDrive folder.
 - Sign in to an existing phone-only account, verify the email code, and confirm the local profile and inventory migrate without replacing existing server records.
 - Adjust stock while online, sign in on another device, and confirm each user's items stay isolated. Repeat an adjustment offline and confirm it syncs after sign-in.
 - During sign-up, confirm account creation is blocked until the Terms/Privacy and essential app-storage checkbox is selected, then verify the acceptance timestamp is recorded. Confirm no cookie banner appears in the app.
