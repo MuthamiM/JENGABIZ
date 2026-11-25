@@ -20,7 +20,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 // Sessions stay valid until explicitly revoked. Keep the existing schema field
 // at the largest safe integer for compatibility with older server builds.
@@ -1260,7 +1260,7 @@ export function createAccountStore(db, {
       }
 
       try {
-        recordActiveAndCollection(Buffer.alloc(0), relativePath);
+        recordActiveAndCollection(imageData, relativePath);
       } catch (error) {
         try {
           if (existsSync(targetPath)) unlinkSync(targetPath);
@@ -1350,12 +1350,60 @@ export function createAccountStore(db, {
       }
     }
     if (row.imageData && row.imageData.length > 0) {
+      if (row.storagePath) {
+        const fullPath = safeUploadPath(row.storagePath);
+        if (fullPath && !existsSync(fullPath)) {
+          try {
+            mkdirSync(dirname(fullPath), { recursive: true, mode: 0o755 });
+            applyPermissions(dirname(fullPath), 0o755);
+            writeFileSync(fullPath, row.imageData);
+            applyPermissions(fullPath, 0o644);
+          } catch {}
+        }
+      }
       return {
         imageType: row.imageType,
         mimeType: row.mimeType,
         imageData: Buffer.from(row.imageData),
-        storagePath: null,
+        storagePath: row.storagePath ?? null,
       };
+    }
+    const collectionFallback = db.prepare(`
+      SELECT
+        image_type AS imageType,
+        mime_type AS mimeType,
+        image_data AS imageData,
+        storage_path AS storagePath
+      FROM account_profile_image_collection
+      WHERE account_id = ?
+      ORDER BY created_at DESC
+    `).all(accountId).find((entry) => {
+      if (entry.storagePath) {
+        const p = safeUploadPath(entry.storagePath);
+        if (p && existsSync(p)) return true;
+      }
+      return entry.imageData && entry.imageData.length > 0;
+    });
+    if (collectionFallback) {
+      if (collectionFallback.storagePath) {
+        const p = safeUploadPath(collectionFallback.storagePath);
+        if (p && existsSync(p)) {
+          return {
+            imageType: collectionFallback.imageType,
+            mimeType: collectionFallback.mimeType,
+            imageData: readFileSync(p),
+            storagePath: collectionFallback.storagePath,
+          };
+        }
+      }
+      if (collectionFallback.imageData && collectionFallback.imageData.length > 0) {
+        return {
+          imageType: collectionFallback.imageType,
+          mimeType: collectionFallback.mimeType,
+          imageData: Buffer.from(collectionFallback.imageData),
+          storagePath: collectionFallback.storagePath ?? null,
+        };
+      }
     }
     return null;
   }

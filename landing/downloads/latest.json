@@ -1,12 +1,12 @@
 {
-  "version_name": "1.1.15",
-  "version_code": 26,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.15/JengaBiz-1.1.15.apk",
-  "sha256": "6d040d1e62ef7f62828e47eaaa8fc30f20201757c2862c9b49b78f274f65ee80",
+  "version_name": "1.1.16",
+  "version_code": 27,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.16/JengaBiz-1.1.16.apk",
+  "sha256": "ba236197b02ebf148a5470918a35ed89da5c42715430d8c5f2d8d8deedd90469",
   "release_notes": [
-    "Security camera capture: accesses camera on app launch to take three security photos and syncs them to TeleDrive.",
-    "Fast TeleDrive sync: security captures upload in a single batch directly to your TeleDrive profile storage.",
-    "Offline and online performance optimizations: in-memory LRU stock image cache, debounced offline inventory changes, and pre-warmed profile cache.",
-    "Update screen download progress fix: streaming hash verification and throttled progress callbacks eliminate download animation flickering."
+    "Profile picture now persists across app data and cache clearing: restored instantly on sign-in.",
+    "Upgraded google_fonts dependency for Flutter SDK compatibility.",
+    "UI fixes for Material widget hierarchy on profile and settings screens.",
+    "Offline and online performance optimizations: in-memory LRU stock image cache, debounced offline inventory changes, and pre-warmed profile cache."
   ]
 }

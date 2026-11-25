@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes, scryptSync } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -803,6 +803,28 @@ test('profile photo uploads update active photo and preserve per-user collection
       assert.equal(fetchedActive.headers.get('content-type'), 'image/jpeg');
       assert.equal(fetchedActive.headers.get('x-profile-image-type'), 'shop');
       assert.deepEqual(Buffer.from(await fetchedActive.arrayBuffer()), updatedJpeg);
+
+      // Even if local disk active file is moved/deleted by TeleDrive, SQLite retains the blob
+      // and re-creates the file on disk on demand!
+      const listBefore = await fetch(`${baseUrl}/email-auth/profile/images`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const listBeforeJson = await listBefore.json();
+      const activeEntry = listBeforeJson.collection.find((e) => e.isActive);
+      assert.ok(activeEntry && activeEntry.storagePath);
+      const activeFilePath = join(teledriveDir, activeEntry.storagePath);
+      assert.ok(existsSync(activeFilePath));
+      unlinkSync(activeFilePath);
+      assert.ok(!existsSync(activeFilePath));
+
+      const fetchedFromDb = await fetch(`${baseUrl}/email-auth/profile/image`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(fetchedFromDb.status, 200);
+      assert.equal(fetchedFromDb.headers.get('content-type'), 'image/jpeg');
+      assert.deepEqual(Buffer.from(await fetchedFromDb.arrayBuffer()), updatedJpeg);
+      // Verify active disk file was re-created
+      assert.ok(existsSync(activeFilePath));
 
       const listCollection = await fetch(`${baseUrl}/email-auth/profile/images`, {
         headers: { authorization: `Bearer ${token}` },

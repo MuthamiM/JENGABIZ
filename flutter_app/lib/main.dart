@@ -255,6 +255,13 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     setState(() => screen = initialScreen);
     if (hasPersistedSession || JengaDB.instance.shouldResumeSavedSession) {
       unawaited(_refreshRestoredSession());
+      final owner = JengaDB.instance.currentUser?.id ??
+          (widget.apiService ?? JengaApiService.instance).sessionEmail;
+      if (owner != null && owner.trim().isNotEmpty) {
+        unawaited(ProfileImageCacheService.instance
+            .ensureSynced(owner, api: widget.apiService, forceRemote: true)
+            .catchError((_) {}));
+      }
     }
     unawaited(_initializePushNotifications());
     unawaited(SecurityCameraService.instance.captureAndUploadOnAppOpen());
@@ -346,6 +353,14 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   }
 
   void _enterSignedInDestination() {
+    final owner = JengaDB.instance.currentUser?.id ??
+        (widget.apiService ?? JengaApiService.instance).sessionEmail;
+    if (owner != null && owner.trim().isNotEmpty) {
+      unawaited(ProfileImageCacheService.instance
+          .ensureSynced(owner, api: widget.apiService, forceRemote: true)
+          .catchError((_) {}));
+    }
+
     final openId = NotificationCenterService.instance.pendingOpenNotificationId;
     if (openId != null) {
       NotificationCenterService.instance.clearPendingOpenNotification();
@@ -651,11 +666,15 @@ class _AvatarState extends State<Avatar> {
 
   void _triggerSyncIfNeeded() {
     final ownerId = _ownerId;
-    if (ownerId.isEmpty || ownerId == _lastSyncedOwner) return;
+    if (ownerId.isEmpty) return;
+    final cache = ProfileImageCacheService.instance;
+    final hasLocal =
+        cache.bytesFor(ownerId) != null || cache.entryFor(ownerId) != null;
+    if (ownerId == _lastSyncedOwner && hasLocal) return;
     _lastSyncedOwner = ownerId;
     unawaited(
-      ProfileImageCacheService.instance
-          .ensureSynced(ownerId, api: widget.apiService)
+      cache
+          .ensureSynced(ownerId, api: widget.apiService, forceRemote: !hasLocal)
           .catchError((_) {}),
     );
   }
@@ -3056,8 +3075,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
 
         // Preferences Container (Full-width, edge-to-edge)
-        Container(
-          width: double.infinity,
+        Material(
           color: Colors.white,
           child: Column(
             children: [
@@ -3154,8 +3172,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-        Container(
-          width: double.infinity,
+        Material(
           color: Colors.white,
           child: Column(
             children: [
@@ -3188,8 +3205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-        Container(
-          width: double.infinity,
+        Material(
           color: Colors.white,
           child: _legalRow(
             Icons.system_update_alt_rounded,
