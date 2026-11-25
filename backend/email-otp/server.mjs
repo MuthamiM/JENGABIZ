@@ -133,6 +133,8 @@ export function createEmailOtpHandler({
   hashSecret = process.env.OTP_HASH_SECRET || randomBytes(32).toString('hex'),
   sendEmail = sendResendEmail,
   sendPush = sendFirebasePush,
+  getLatestRelease,
+  latestReleaseUrl = process.env.JENGABIZ_LATEST_MANIFEST_URL || 'http://jengabiz-landing/downloads/latest.json',
   now = Date.now,
   makeOtp = () => String(randomInt(100000, 1000000)),
   adminEmail = process.env.JENGABIZ_ADMIN_EMAIL || '',
@@ -163,6 +165,83 @@ export function createEmailOtpHandler({
   const supportRequestsByIp = new Map();
   const supportTicketsByAccount = new Map();
   const verificationGrants = new Map();
+  let cachedRelease = null;
+  let cachedReleaseExpiresAt = 0;
+
+  async function resolveLatestRelease() {
+    if (typeof getLatestRelease === 'function') {
+      try {
+        const rel = await getLatestRelease();
+        if (rel && Number.isSafeInteger(rel.versionCode) && rel.versionCode > 0 && rel.versionName) {
+          return rel;
+        }
+      } catch {}
+      return null;
+    }
+    const currentTime = now();
+    if (cachedRelease && cachedReleaseExpiresAt > currentTime) {
+      return cachedRelease;
+    }
+    if (!latestReleaseUrl) return null;
+    try {
+      const res = await fetch(latestReleaseUrl, {
+        headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!res.ok) return null;
+      const decoded = await res.json();
+      const versionCode = Number(decoded?.version_code);
+      const versionName = typeof decoded?.version_name === 'string' ? decoded.version_name.trim() : '';
+      if (!Number.isSafeInteger(versionCode) || versionCode <= 0 || !versionName) {
+        return null;
+      }
+      cachedRelease = { versionCode, versionName };
+      cachedReleaseExpiresAt = currentTime + 60_000;
+      return cachedRelease;
+    } catch {
+      return null;
+    }
+  }
+
+  async function notifyAccountDevicesOfUpdate(accountId, targetToken = null) {
+    const latest = await resolveLatestRelease();
+    if (!latest) return;
+    const devices = targetToken
+      ? [accounts.getNotificationDevice(accountId, targetToken)].filter(Boolean)
+      : accounts.listNotificationDevices(accountId);
+    const outdated = devices.filter(
+      (device) =>
+        (device.appVersionCode == null || device.appVersionCode < latest.versionCode) &&
+        (device.lastUpdatePushVersion || 0) < latest.versionCode,
+    );
+    if (outdated.length === 0) return;
+
+    await Promise.all(
+      outdated.map((device) => {
+        accounts.markDeviceUpdatePushed(device.token, latest.versionCode);
+        return sendPush(device.token, {
+          title: `Update JengaBiz to v${latest.versionName}`,
+          body: `Version ${latest.versionName} is ready. Open Profile → Check for updates to install.`,
+          data: {
+            type: 'update',
+            route: 'update',
+            versionCode: String(latest.versionCode),
+            versionName: latest.versionName,
+            actionLabel: 'Update now',
+          },
+        }).catch((error) => {
+          const details = error?.response?.error?.details;
+          const unregistered = Array.isArray(details) && details.some(
+            (detail) => detail?.errorCode === 'UNREGISTERED',
+          );
+          if (error?.statusCode === 404 || unregistered) {
+            accounts.removeNotificationDevice(accountId, device.token);
+          }
+          return false;
+        });
+      }),
+    );
+  }
   const digestOtp = (email, otp) =>
     createHash('sha256')
       .update(`${hashSecret}\0${email}\0${otp}`)
@@ -369,6 +448,9 @@ export function createEmailOtpHandler({
             return json(response, 401, { success: false, message: 'Email or password is incorrect.' });
           }
           loginFailures.delete(key);
+          if (result?.user?.id) {
+            void notifyAccountDevicesOfUpdate(result.user.id);
+          }
           return json(response, 200, { success: true, ...result });
         }
 
@@ -551,7 +633,19 @@ export function createEmailOtpHandler({
           if (!['android', 'ios'].includes(platform)) {
             return json(response, 400, { success: false, message: 'Platform must be android or ios.' });
           }
-          accounts.saveNotificationDevice(session.id, deviceToken, platform, now());
+          const rawVersionCode = payload?.appVersionCode;
+          const appVersionCode = Number.isSafeInteger(rawVersionCode) &&
+            rawVersionCode > 0 && rawVersionCode <= 1_000_000_000
+            ? rawVersionCode
+            : null;
+          accounts.saveNotificationDevice(
+            session.id,
+            deviceToken,
+            platform,
+            now(),
+            appVersionCode,
+          );
+          void notifyAccountDevicesOfUpdate(session.id, deviceToken);
           return json(response, 200, { success: true });
         }
         if (stockImageMatch) {
@@ -656,7 +750,15 @@ export function createEmailOtpHandler({
             sendPush(device.token, {
               title,
               body,
-              data: { itemId: item.id, stockRemaining: String(item.stockRemaining) },
+              data: {
+                itemId: item.id,
+                itemName: item.name,
+                stockRemaining: String(item.stockRemaining),
+                reorderLevel: String(item.reorderLevel),
+                alertType: isOutOfStock ? 'out_of_stock' : isLowStock ? 'low_stock' : 'half_sold',
+                route: 'stock',
+                actionLabel: isOutOfStock || isLowStock ? 'Restock product' : 'View in Stock',
+              },
             }).catch((error) => {
               const details = error?.response?.error?.details;
               const unregistered = Array.isArray(details) && details.some(

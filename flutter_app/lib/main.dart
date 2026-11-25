@@ -21,6 +21,7 @@ import 'services/db_service.dart';
 import 'services/firebase_push_service.dart';
 import 'services/inventory_pdf_export_service.dart';
 import 'services/location_biometric_service.dart';
+import 'services/notification_center_service.dart';
 import 'services/profile_image_cache_service.dart';
 import 'services/stock_notification_service.dart';
 
@@ -80,18 +81,16 @@ enum AppScreen {
   update,
 }
 
-class Notice {
-  Notice(this.id, this.title, this.body, this.time, this.tone, this.icon,
-      {this.read = false});
-  final int id;
-  final String title, body, time;
-  final Color tone;
-  final IconData icon;
-  bool read;
-}
-
 class Root extends StatefulWidget {
-  const Root({super.key});
+  const Root({
+    super.key,
+    this.updateLoader,
+    this.apiService,
+  });
+
+  final Future<JengaBizRelease?> Function()? updateLoader;
+  final JengaApiService? apiService;
+
   @override
   State<Root> createState() => _RootState();
 }
@@ -100,13 +99,19 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   late AppScreen screen;
   Timer? _stockRetryTimer;
   JengaBizRelease? _availableUpdate;
+  int _dismissedUpdateCode = 0;
   AppScreen _screenBeforeUpdate = AppScreen.splash;
   bool _hasSeenWelcome = false;
+  String? _expandNotificationId;
+  int _notificationOpenSeq = 0;
+  String? _stockFocusItemId;
+  String? _stockStatusFilter;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    NotificationCenterService.instance.addListener(_onNotificationsChanged);
     screen = AppScreen.splash;
     unawaited(_initializeApp());
     _initAppLocation();
@@ -117,14 +122,38 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _startPendingStockRetries();
+      unawaited(NotificationCenterService.instance.reloadFromStorage());
       unawaited(_syncAccountInventoryOnResume());
       unawaited(_retryPendingStockUpload());
+      if (_isSignedInScreen(screen) && screen != AppScreen.update) {
+        unawaited(_loadAvailableUpdate(openIfAvailable: true));
+      }
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _stockRetryTimer?.cancel();
       _stockRetryTimer = null;
     }
   }
+
+  void _onNotificationsChanged() {
+    if (!mounted) return;
+    final openId = NotificationCenterService.instance.pendingOpenNotificationId;
+    if (openId != null && _isSignedInScreen(screen)) {
+      NotificationCenterService.instance.clearPendingOpenNotification();
+      setState(() {
+        _expandNotificationId = openId;
+        _notificationOpenSeq = NotificationCenterService.instance.openRequestSeq;
+        screen = AppScreen.notifications;
+      });
+      return;
+    }
+    setState(() {});
+  }
+
+  bool _isSignedInScreen(AppScreen candidate) =>
+      candidate != AppScreen.splash &&
+      candidate != AppScreen.welcome &&
+      candidate != AppScreen.auth;
 
   void _startPendingStockRetries() {
     _stockRetryTimer?.cancel();
@@ -157,6 +186,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    NotificationCenterService.instance.removeListener(_onNotificationsChanged);
     _stockRetryTimer?.cancel();
     super.dispose();
   }
@@ -165,6 +195,12 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     try {
       await JengaDB.instance.init();
     } catch (_) {}
+
+    await NotificationCenterService.instance.ensureInitialized(
+      accountScope: JengaDB.instance.currentUser?.email ??
+          JengaDB.instance.currentUser?.id,
+    );
+    unawaited(StockNotificationService.instance.initialize());
 
     final api = JengaApiService.instance;
     final hasPersistedSession =
@@ -183,7 +219,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       }
     } catch (_) {}
 
-    final initialScreen =
+    var initialScreen =
         hasPersistedSession || JengaDB.instance.shouldResumeSavedSession
             ? AppScreen.home
             : welcomeSeen
@@ -196,13 +232,23 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       await _markWelcomeSeen();
     }
     if (!mounted) return;
+    final pendingOpenId =
+        NotificationCenterService.instance.pendingOpenNotificationId;
+    if (_isSignedInScreen(initialScreen) && pendingOpenId != null) {
+      NotificationCenterService.instance.clearPendingOpenNotification();
+      _expandNotificationId = pendingOpenId;
+      _notificationOpenSeq = NotificationCenterService.instance.openRequestSeq;
+      initialScreen = AppScreen.notifications;
+    }
     _screenBeforeUpdate = initialScreen;
     setState(() => screen = initialScreen);
     if (hasPersistedSession || JengaDB.instance.shouldResumeSavedSession) {
       unawaited(_refreshRestoredSession());
-      unawaited(_initializePushNotifications());
     }
-    unawaited(_loadAvailableUpdate());
+    unawaited(_initializePushNotifications());
+    unawaited(_loadAvailableUpdate(
+      openIfAvailable: initialScreen == AppScreen.home,
+    ));
   }
 
   Future<void> _refreshRestoredSession() async {
@@ -227,17 +273,31 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _loadAvailableUpdate() async {
-    final update = await AppUpdateService.instance.availableRelease();
+  Future<void> _loadAvailableUpdate({bool openIfAvailable = false}) async {
+    final update =
+        await (widget.updateLoader ?? AppUpdateService.instance.availableRelease)();
     if (!mounted || update == null) return;
-    var dismissedUpdateCode = 0;
+    var dismissedUpdateCode = _dismissedUpdateCode;
     try {
-      dismissedUpdateCode = (await SharedPreferences.getInstance())
+      final savedDismissed = (await SharedPreferences.getInstance())
               .getInt('jengabiz_update_dismissed_code') ??
           0;
+      if (savedDismissed > dismissedUpdateCode) {
+        dismissedUpdateCode = savedDismissed;
+      }
     } catch (_) {}
-    if (update.versionCode > dismissedUpdateCode) {
-      setState(() => _availableUpdate = update);
+    _dismissedUpdateCode = dismissedUpdateCode;
+    if (update.versionCode <= dismissedUpdateCode) return;
+
+    setState(() => _availableUpdate = update);
+    if (openIfAvailable &&
+        _isSignedInScreen(screen) &&
+        screen != AppScreen.update &&
+        screen != AppScreen.notifications) {
+      setState(() {
+        _screenBeforeUpdate = screen;
+        screen = AppScreen.update;
+      });
     }
   }
 
@@ -248,6 +308,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
 
   void _dismissAppUpdate(JengaBizRelease? release) {
     if (release != null) {
+      _dismissedUpdateCode = release.versionCode;
       unawaited(SharedPreferences.getInstance().then(
         (preferences) => preferences.setInt(
           'jengabiz_update_dismissed_code',
@@ -255,15 +316,50 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
         ),
       ));
     }
-    go(_screenBeforeUpdate);
+    final target = _isSignedInScreen(_screenBeforeUpdate) &&
+            _screenBeforeUpdate != AppScreen.update
+        ? _screenBeforeUpdate
+        : AppScreen.home;
+    go(target);
   }
 
   void _openAuth() {
     _hasSeenWelcome = true;
     unawaited(_markWelcomeSeen());
-    go(JengaDB.instance.shouldResumeSavedSession
-        ? AppScreen.home
-        : AppScreen.auth);
+    if (JengaDB.instance.shouldResumeSavedSession) {
+      _enterSignedInDestination();
+    } else {
+      go(AppScreen.auth);
+    }
+  }
+
+  void _enterSignedInDestination() {
+    final openId = NotificationCenterService.instance.pendingOpenNotificationId;
+    if (openId != null) {
+      NotificationCenterService.instance.clearPendingOpenNotification();
+      setState(() {
+        _expandNotificationId = openId;
+        _notificationOpenSeq =
+            NotificationCenterService.instance.openRequestSeq;
+        screen = AppScreen.notifications;
+      });
+      unawaited(_loadAvailableUpdate(openIfAvailable: false));
+      return;
+    }
+
+    final cachedUpdate = _availableUpdate;
+    if (cachedUpdate != null &&
+        cachedUpdate.versionCode > _dismissedUpdateCode) {
+      setState(() {
+        _screenBeforeUpdate = AppScreen.home;
+        screen = AppScreen.update;
+      });
+      unawaited(_loadAvailableUpdate(openIfAvailable: false));
+      return;
+    }
+
+    go(AppScreen.home);
+    unawaited(_loadAvailableUpdate(openIfAvailable: true));
   }
 
   void _backFromAuth() {
@@ -295,49 +391,38 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  final List<Notice> notices = [
-    Notice(
-        1,
-        'New order received',
-        'Wireless Headphone x2 was ordered for KES 501.50.',
-        '2m ago',
-        kTintPurple,
-        Icons.shopping_bag_outlined),
-    Notice(
-        2,
-        'Payment received',
-        'KES 1,240.00 has been added to your earnings.',
-        '1h ago',
-        kTintMint,
-        Icons.download_rounded),
-    Notice(3, 'Low stock alert', 'Running Shoes is down to 12 units.', '3h ago',
-        kTintPeach, Icons.inventory_2_outlined),
-    Notice(
-        4,
-        'Delivery completed',
-        'Order #13620 was delivered to the customer.',
-        'Yesterday',
-        kTintBlue,
-        Icons.local_shipping_outlined,
-        read: true),
-    Notice(
-        5,
-        'Monthly report ready',
-        'Your July 2024 report is ready to export.',
-        '2 days ago',
-        kTintPurple,
-        Icons.bar_chart_rounded,
-        read: true),
-  ];
+  int get unread => NotificationCenterService.instance.unreadCount;
 
-  int get unread {
-    final halfSoldCount =
-        JengaDB.instance.items.where((i) => i.isHalfSold).length;
-    final noticeCount = notices.where((n) => !n.read).length;
-    return halfSoldCount > 0 ? (noticeCount + 3) : noticeCount;
+  void go(AppScreen s) => setState(() {
+        if (s != AppScreen.notifications) {
+          _expandNotificationId = null;
+        }
+        if (s != AppScreen.stock) {
+          _stockFocusItemId = null;
+          _stockStatusFilter = null;
+        }
+        screen = s;
+      });
+
+  void _handleNotificationAction(NotificationAction action) {
+    final route = action.route;
+    if (route == 'stock') {
+      setState(() {
+        _expandNotificationId = null;
+        _stockFocusItemId = action.itemId;
+        _stockStatusFilter = action.stockFilter;
+        screen = AppScreen.stock;
+      });
+    } else if (route == 'analytics') {
+      go(AppScreen.analytics);
+    } else if (route == 'profile') {
+      go(AppScreen.profile);
+    } else if (route == 'update') {
+      _openAppUpdates();
+    } else {
+      go(AppScreen.home);
+    }
   }
-
-  void go(AppScreen s) => setState(() => screen = s);
 
   Widget _body() {
     switch (screen) {
@@ -347,12 +432,15 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
         return WelcomeScreen(onStart: _openAuth);
       case AppScreen.auth:
         return AuthScreen(
-          onSuccess: () => go(AppScreen.home),
+          apiService: widget.apiService,
+          onSuccess: _enterSignedInDestination,
           onBack: _backFromAuth,
         );
       case AppScreen.stock:
         return StockScreen(
           onBack: () => go(AppScreen.home),
+          focusItemId: _stockFocusItemId,
+          initialStatusFilter: _stockStatusFilter,
         );
       case AppScreen.home:
         return HomeScreen(go: go, unread: unread);
@@ -377,17 +465,9 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       case AppScreen.notifications:
         return NotificationsScreen(
           onBack: () => go(AppScreen.home),
-          onNavigate: (route) {
-            if (route == 'stock') {
-              go(AppScreen.stock);
-            } else if (route == 'analytics') {
-              go(AppScreen.analytics);
-            } else if (route == 'profile') {
-              go(AppScreen.profile);
-            } else {
-              go(AppScreen.home);
-            }
-          },
+          onAction: _handleNotificationAction,
+          expandNotificationId: _expandNotificationId,
+          openRequestSeq: _notificationOpenSeq,
         );
     }
   }
@@ -447,7 +527,7 @@ class RoundBtn extends StatelessWidget {
                   color: kPurple,
                   borderRadius: BorderRadius.circular(9),
                   border: Border.all(color: kBg, width: 2)),
-              child: Text('$badge',
+              child: Text(badge > 99 ? '99+' : '$badge',
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 10,

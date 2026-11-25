@@ -113,6 +113,8 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
       token TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
       platform TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+      app_version_code INTEGER,
+      last_update_push_version INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS notification_devices_account_idx ON notification_devices(account_id);
@@ -158,6 +160,16 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
     CREATE UNIQUE INDEX IF NOT EXISTS accounts_referral_code_unique
       ON accounts(referral_code) WHERE referral_code IS NOT NULL;
   `);
+
+  const deviceColumns = new Set(
+    db.prepare('PRAGMA table_info(notification_devices)').all().map((column) => column.name),
+  );
+  if (!deviceColumns.has('app_version_code')) {
+    db.exec('ALTER TABLE notification_devices ADD COLUMN app_version_code INTEGER');
+  }
+  if (!deviceColumns.has('last_update_push_version')) {
+    db.exec('ALTER TABLE notification_devices ADD COLUMN last_update_push_version INTEGER NOT NULL DEFAULT 0');
+  }
 
   const missingCodes = db.prepare(
     "SELECT id FROM accounts WHERE referral_code IS NULL OR referral_code = ''",
@@ -1060,15 +1072,25 @@ export function createAccountStore(db, {
     ).run(accountId).changes;
   }
 
-  function saveNotificationDevice(accountId, token, platform, updatedAt = now()) {
+  function saveNotificationDevice(
+    accountId,
+    token,
+    platform,
+    updatedAt = now(),
+    appVersionCode = null,
+  ) {
+    const validVersionCode = Number.isSafeInteger(appVersionCode) && appVersionCode > 0
+      ? appVersionCode
+      : null;
     db.prepare(`
-      INSERT INTO notification_devices (token, account_id, platform, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO notification_devices (token, account_id, platform, app_version_code, last_update_push_version, updated_at)
+      VALUES (?, ?, ?, ?, 0, ?)
       ON CONFLICT(token) DO UPDATE SET
         account_id = excluded.account_id,
         platform = excluded.platform,
+        app_version_code = excluded.app_version_code,
         updated_at = excluded.updated_at
-    `).run(token, accountId, platform, updatedAt);
+    `).run(token, accountId, platform, validVersionCode, updatedAt);
   }
 
   function removeNotificationDevice(accountId, token) {
@@ -1077,8 +1099,36 @@ export function createAccountStore(db, {
   }
 
   function listNotificationDevices(accountId) {
-    return db.prepare('SELECT token, platform FROM notification_devices WHERE account_id = ?')
-      .all(accountId);
+    return db.prepare(`
+      SELECT
+        token,
+        platform,
+        app_version_code AS appVersionCode,
+        last_update_push_version AS lastUpdatePushVersion
+      FROM notification_devices
+      WHERE account_id = ?
+    `).all(accountId);
+  }
+
+  function getNotificationDevice(accountId, token) {
+    return db.prepare(`
+      SELECT
+        token,
+        platform,
+        app_version_code AS appVersionCode,
+        last_update_push_version AS lastUpdatePushVersion
+      FROM notification_devices
+      WHERE account_id = ? AND token = ?
+    `).get(accountId, token) ?? null;
+  }
+
+  function markDeviceUpdatePushed(token, versionCode) {
+    if (!Number.isSafeInteger(versionCode) || versionCode <= 0) return;
+    db.prepare(`
+      UPDATE notification_devices
+      SET last_update_push_version = MAX(last_update_push_version, ?)
+      WHERE token = ?
+    `).run(versionCode, token);
   }
 
   function revokeSession(tokenHash) {
@@ -1115,6 +1165,8 @@ export function createAccountStore(db, {
     saveNotificationDevice,
     removeNotificationDevice,
     listNotificationDevices,
+    getNotificationDevice,
+    markDeviceUpdatePushed,
     revokeSession,
   };
 }

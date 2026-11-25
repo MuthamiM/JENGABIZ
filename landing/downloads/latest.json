@@ -1,11 +1,11 @@
 {
-  "version_name": "1.1.10",
-  "version_code": 21,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.10/JengaBiz-1.1.10.apk",
-  "sha256": "c4f64b980d97b1524683ca9e1cdce033dd1b932bd99e522752b195cd6122cb72",
+  "version_name": "1.1.11",
+  "version_code": 22,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.11/JengaBiz-1.1.11.apk",
+  "sha256": "90ebca2632df90484412dc6c7e7c6c07ac2ac0aedbba42e4f23a0206646543a5",
   "release_notes": [
-    "Fixed account review requests timing out while tickets were already created.",
-    "Removed phone numbers and email from the password reset unavailable message.",
-    "Improved in-app update stability and support reliability."
+    "Show accurate unread notification counts without hardcoded badge numbers.",
+    "Expand notifications inline with full details, actions, and push deep linking.",
+    "Prompt for app updates after sign-in and notify older app versions via push."
   ]
 }

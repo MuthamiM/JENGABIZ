@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'cache_service.dart';
 import 'firebase_push_service.dart';
+import 'notification_center_service.dart';
 import 'password_hasher.dart';
 import 'stock_image_cache_service.dart';
 
@@ -243,6 +244,8 @@ class JengaDB {
     }
 
     await _refreshStockWidget();
+    await NotificationCenterService.instance
+        .setAccountScope(currentUser?.email ?? currentUser?.id);
     isInitialized = true;
   }
 
@@ -445,6 +448,7 @@ class JengaDB {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('current_user_id', user.id);
     await _persistItemsLocally();
+    await NotificationCenterService.instance.setAccountScope(user.email);
   }
 
   Future<void> _resumeSavedSession() async {
@@ -695,6 +699,7 @@ class JengaDB {
     );
     await prefs.setString('current_user_id', user.id);
     await _persistItemsLocally();
+    await NotificationCenterService.instance.setAccountScope(user.email);
     return user;
   }
 
@@ -784,6 +789,7 @@ class JengaDB {
     } catch (_) {
       // The in-memory account and secure API session are already cleared.
     }
+    await NotificationCenterService.instance.setAccountScope(null);
     await apiLogout;
   }
 
@@ -793,6 +799,7 @@ class JengaDB {
     shouldResumeSavedSession = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('current_user_id');
+    await NotificationCenterService.instance.setAccountScope(null);
   }
 
   Future<bool> adjustStock(String itemId, int delta) async {

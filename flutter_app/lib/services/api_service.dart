@@ -303,11 +303,17 @@ class JengaApiService {
   Future<bool> registerNotificationDevice({
     required String deviceToken,
     required String platform,
+    int? appVersionCode,
   }) async {
     final response = await _requestJson(
       'POST',
       '/email-auth/notifications/device',
-      payload: {'deviceToken': deviceToken, 'platform': platform},
+      payload: {
+        'deviceToken': deviceToken,
+        'platform': platform,
+        if (appVersionCode != null && appVersionCode > 0)
+          'appVersionCode': appVersionCode,
+      },
     );
     return response?.succeeded == true;
   }

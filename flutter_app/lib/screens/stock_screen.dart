@@ -8,8 +8,15 @@ import '../widgets/product_editor_dialog.dart';
 enum StockSort { stockLow, stockHigh, soldHigh, priceLow, priceHigh, nameAsc }
 
 class StockScreen extends StatefulWidget {
-  const StockScreen({super.key, required this.onBack});
+  const StockScreen({
+    super.key,
+    required this.onBack,
+    this.focusItemId,
+    this.initialStatusFilter,
+  });
   final VoidCallback onBack;
+  final String? focusItemId;
+  final String? initialStatusFilter;
 
   @override
   State<StockScreen> createState() => _StockScreenState();
@@ -25,13 +32,41 @@ class _StockScreenState extends State<StockScreen> {
   @override
   void initState() {
     super.initState();
+    _applyInitialFocus();
     _syncInventoryOnOpen();
+  }
+
+  void _applyInitialFocus() {
+    if (widget.initialStatusFilter != null &&
+        const {
+          'All',
+          'In Stock',
+          'Half Sold (50%+)',
+          'Low Stock',
+          'Out of Stock',
+        }.contains(widget.initialStatusFilter)) {
+      _statusFilter = widget.initialStatusFilter!;
+    }
+    if (widget.focusItemId != null) {
+      final matching =
+          JengaDB.instance.items.where((it) => it.id == widget.focusItemId);
+      if (matching.isNotEmpty) {
+        _statusFilter = 'All';
+        _selectedCategory = 'All';
+        _searchCtrl.text = matching.first.name;
+      }
+    }
   }
 
   Future<void> _syncInventoryOnOpen() async {
     try {
       final synced = await JengaDB.instance.syncStockWithServer();
-      if (mounted && synced) setState(() {});
+      if (mounted && synced) {
+        if (widget.focusItemId != null && _searchCtrl.text.isEmpty) {
+          _applyInitialFocus();
+        }
+        setState(() {});
+      }
     } catch (_) {
       // Keep the cached inventory visible and retry on the next app resume.
     }
@@ -97,6 +132,15 @@ class _StockScreenState extends State<StockScreen> {
       case StockSort.nameAsc:
         filtered.sort((a, b) => a.name.compareTo(b.name));
         break;
+    }
+
+    if (widget.focusItemId != null) {
+      final focusIdx =
+          filtered.indexWhere((item) => item.id == widget.focusItemId);
+      if (focusIdx > 0) {
+        final focused = filtered.removeAt(focusIdx);
+        filtered.insert(0, focused);
+      }
     }
 
     return filtered;
@@ -610,6 +654,9 @@ class _StockScreenState extends State<StockScreen> {
       statusText = 'IN STOCK';
     }
 
+    final isFocused =
+        widget.focusItemId != null && item.id == widget.focusItemId;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
@@ -617,9 +664,14 @@ class _StockScreenState extends State<StockScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: item.isLowStock
-              ? const Color(0xFFFFD180)
-              : (item.isOutOfStock ? const Color(0xFFFFCDD2) : defaultBorder),
+          width: isFocused ? 1.8 : 1.0,
+          color: isFocused
+              ? blue
+              : item.isLowStock
+                  ? const Color(0xFFFFD180)
+                  : (item.isOutOfStock
+                      ? const Color(0xFFFFCDD2)
+                      : defaultBorder),
         ),
         boxShadow: const [
           BoxShadow(

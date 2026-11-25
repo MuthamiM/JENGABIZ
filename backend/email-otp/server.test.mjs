@@ -402,6 +402,9 @@ test('stock alert device tokens are account scoped and alerts fire on low or emp
     assert.equal(pushes.length, 2);
     assert.equal(pushes[1].title, 'Low stock alert');
     assert.equal(pushes[1].data.stockRemaining, '5');
+    assert.equal(pushes[1].data.alertType, 'low_stock');
+    assert.equal(pushes[1].data.route, 'stock');
+    assert.equal(pushes[1].data.actionLabel, 'Restock product');
 
     await request(baseUrl, '/email-auth/stock/items', {
       method: 'PUT',
@@ -579,4 +582,73 @@ test('suspended accounts receive 201 ticketId from support/request even when ups
   } finally {
     await new Promise((resolve) => supportServer.close(resolve));
   }
+});
+
+test('legacy app devices receive an update push after login while current apps do not', async () => {
+  const pushes = [];
+  await withService({
+    apiKey: 'test-key',
+    fromEmail: 'verify@example.com',
+    hashSecret: 'test-hash-secret',
+    makeOtp: () => '246810',
+    sendEmail: async () => {},
+    getLatestRelease: async () => ({ versionCode: 22, versionName: '1.1.11' }),
+    sendPush: async (token, notification) => {
+      pushes.push({ token, ...notification });
+      return true;
+    },
+  }, async (baseUrl) => {
+    await post(baseUrl, '/email-auth/request-otp', { email: 'legacy@example.com' });
+    const verification = await post(baseUrl, '/email-auth/verify-otp', {
+      email: 'legacy@example.com',
+      otp: '246810',
+    });
+    const registered = await post(baseUrl, '/email-auth/register', {
+      email: 'legacy@example.com',
+      verificationToken: verification.body.verificationToken,
+      name: 'Legacy Owner',
+      shopName: 'Legacy Shop',
+      phone: '',
+      password: 'correct horse battery',
+      items: [],
+    });
+    assert.equal(registered.status, 201);
+
+    // Simulate an older app (<= 1.1.10) registering without appVersionCode.
+    const oldDeviceReg = await request(baseUrl, '/email-auth/notifications/device', {
+      method: 'POST',
+      token: registered.body.sessionToken,
+      payload: { deviceToken: 'old-app-token', platform: 'android' },
+    });
+    assert.equal(oldDeviceReg.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0].token, 'old-app-token');
+    assert.equal(pushes[0].title, 'Update JengaBiz to v1.1.11');
+    assert.equal(pushes[0].data.route, 'update');
+    assert.equal(pushes[0].data.versionCode, '22');
+
+    // Logging in again on that same old device does not duplicate push for v22.
+    const login = await post(baseUrl, '/email-auth/login', {
+      email: 'legacy@example.com',
+      password: 'correct horse battery',
+    });
+    assert.equal(login.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(pushes.length, 1);
+
+    // Simulate a device already running v1.1.11 (appVersionCode: 22).
+    const newDeviceReg = await request(baseUrl, '/email-auth/notifications/device', {
+      method: 'POST',
+      token: login.body.sessionToken,
+      payload: {
+        deviceToken: 'new-app-token',
+        platform: 'android',
+        appVersionCode: 22,
+      },
+    });
+    assert.equal(newDeviceReg.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(pushes.length, 1);
+  });
 });

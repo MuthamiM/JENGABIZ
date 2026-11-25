@@ -1,6 +1,14 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'notification_center_service.dart';
+
+/// Displays OS heads-up notifications for stock alerts and foreground pushes,
+/// records them in [NotificationCenterService], and routes notification taps
+/// to the expanded notification screen.
 class StockNotificationService {
   StockNotificationService._();
 
@@ -12,24 +20,54 @@ class StockNotificationService {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  bool _launchDetailsChecked = false;
 
   Future<void> initialize() async {
-    if (_initialized) return;
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(),
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    try {
+      if (!_initialized) {
+        const settings = InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          iOS: DarwinInitializationSettings(),
+        );
+        await _notifications.initialize(
+          settings,
+          onDidReceiveNotificationResponse: _handleNotificationResponse,
+        );
+        await _notifications
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(const AndroidNotificationChannel(
+              _channelId,
+              _channelName,
+              description: 'Alerts when a product needs restocking.',
+              importance: Importance.high,
+            ));
+        _initialized = true;
+      }
+
+      if (!_launchDetailsChecked) {
+        _launchDetailsChecked = true;
+        final launchDetails =
+            await _notifications.getNotificationAppLaunchDetails();
+        final payload = launchDetails?.notificationResponse?.payload;
+        if (launchDetails?.didNotificationLaunchApp == true &&
+            payload != null &&
+            payload.trim().isNotEmpty) {
+          unawaited(
+            NotificationCenterService.instance.requestOpenNotification(payload),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _handleNotificationResponse(NotificationResponse response) {
+    final payload = response.payload?.trim();
+    if (payload == null || payload.isEmpty) return;
+    unawaited(
+      NotificationCenterService.instance.requestOpenNotification(payload),
     );
-    await _notifications.initialize(settings);
-    await _notifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(const AndroidNotificationChannel(
-          _channelId,
-          _channelName,
-          description: 'Alerts when a product needs restocking.',
-          importance: Importance.high,
-        ));
-    _initialized = true;
   }
 
   Future<void> showRemoteNotification({
@@ -80,18 +118,30 @@ class StockNotificationService {
     required int reorderLevel,
     int? previousRemaining,
   }) async {
+    if (previousRemaining != null &&
+        ((remaining <= 0 && previousRemaining <= 0) ||
+            (remaining > 0 && previousRemaining <= reorderLevel))) {
+      return;
+    }
+    if (remaining > reorderLevel && remaining > 0) return;
+
+    final outOfStock = remaining <= 0;
+    final title = outOfStock ? 'Out of stock' : 'Low stock alert';
+    final body = outOfStock
+        ? '$itemName has run out. Restock it now.'
+        : '$itemName has only $remaining left (alert level: $reorderLevel).';
+
+    final recorded = await NotificationCenterService.instance.recordStockAlert(
+      alertKind: outOfStock ? 'out_of_stock' : 'low_stock',
+      itemId: itemId,
+      title: title,
+      body: body,
+    );
+
     try {
       final preferences = await SharedPreferences.getInstance();
       if (!(preferences.getBool(preferenceKey) ?? true)) return;
-      if (previousRemaining != null &&
-          ((remaining <= 0 && previousRemaining <= 0) ||
-              (remaining > 0 && previousRemaining <= reorderLevel))) {
-        return;
-      }
-      if (remaining > reorderLevel && remaining > 0) return;
-
       await initialize();
-      final outOfStock = remaining <= 0;
       const details = NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
@@ -106,12 +156,10 @@ class StockNotificationService {
       final id = itemId.hashCode & 0x7fffffff;
       await _notifications.show(
         id,
-        outOfStock ? 'Out of stock' : 'Low stock alert',
-        outOfStock
-            ? '$itemName has run out. Restock it now.'
-            : '$itemName has only $remaining left (alert level: $reorderLevel).',
+        title,
+        body,
         details,
-        payload: itemId,
+        payload: recorded.id,
       );
     } catch (_) {
       // Notification platform failures must not undo a saved stock change.
@@ -132,6 +180,16 @@ class StockNotificationService {
         previousUnitsSold >= previousRemaining) {
       return;
     }
+
+    const title = 'Stock update';
+    final body = '$itemName is at least 50% sold. $remaining units remain.';
+    final recorded = await NotificationCenterService.instance.recordStockAlert(
+      alertKind: 'half_sold',
+      itemId: itemId,
+      title: title,
+      body: body,
+    );
+
     try {
       final preferences = await SharedPreferences.getInstance();
       if (!(preferences.getBool(preferenceKey) ?? true)) return;
@@ -149,10 +207,10 @@ class StockNotificationService {
       );
       await _notifications.show(
         (itemId.hashCode ^ 0x40000000) & 0x7fffffff,
-        'Stock update',
-        '$itemName is at least 50% sold. $remaining units remain.',
+        title,
+        body,
         details,
-        payload: itemId,
+        payload: recorded.id,
       );
     } catch (_) {
       // Notification failures must not interrupt a saved sale.
