@@ -1,11 +1,11 @@
 {
-  "version_name": "1.1.12",
-  "version_code": 23,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.12/JengaBiz-1.1.12.apk",
-  "sha256": "2121b7acfdadda5f392245718b7f950d4b810fb4cee780d6c5484443cfdc9bbf",
+  "version_name": "1.1.13",
+  "version_code": 24,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.13/JengaBiz-1.1.13.apk",
+  "sha256": "18e4e0e2ca6a9add6b95ee68560bad87be3dbd9e6f7fda018cc72d172af0c3fc",
   "release_notes": [
-    "Enabled Personal and Shop profile photo uploads from gallery or camera.",
-    "Save uploaded profile photos directly in the TeleDrive backup folder with offline sync.",
-    "Updated in-app and website privacy and terms policies for profile photo uploads."
+    "Fixed circular profile photo cropping on Profile and live avatar display in the Home header.",
+    "Synced profile photos reactively across screens and cleared cached images cleanly on sign-out.",
+    "Improved dashboard card and photo-type chip sizing to prevent layout overflows."
   ]
 }

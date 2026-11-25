@@ -373,6 +373,56 @@ void main() {
     await tester.tap(find.byIcon(Icons.camera_alt_rounded));
     await tester.pumpAndSettle();
     expect(find.text('Remove photo'), findsOneWidget);
+
+    // Verify circular clipping on ProfileScreen.
+    final profileClip = find.ancestor(
+      of: find.byType(Image),
+      matching: find.byType(ClipOval),
+    );
+    expect(profileClip, findsOneWidget);
+    final profileSize = tester.getSize(profileClip);
+    expect(profileSize.width, profileSize.height);
+
+    // Dismiss bottom sheet, mount HomeScreen, and confirm photo appears in a circle in Home header too.
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeScreen(
+            go: (_) {},
+            unread: 0,
+            avatarApiService: api,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final homeClip = find.ancestor(
+      of: find.byType(Image),
+      matching: find.byType(ClipOval),
+    );
+    expect(homeClip, findsOneWidget);
+    final homeSize = tester.getSize(homeClip);
+    expect(homeSize.width, homeSize.height);
+    expect(homeSize.width, lessThanOrEqualTo(46));
+
+    // Re-mount ProfileScreen and remove the uploaded photo.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileScreen(
+            go: (_) {},
+            unread: 0,
+            onLogout: () {},
+            apiService: api,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.camera_alt_rounded));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Remove photo'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove photo').last);
@@ -392,6 +442,22 @@ void main() {
     expect(deleteRequests.first['path'], '/email-auth/profile/image');
     expect(find.text('Profile photo removed.'), findsOneWidget);
     expect(find.text('Shop photo'), findsNothing);
+
+    // HomeScreen also reverts to default initial badge after removal.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeScreen(
+            go: (_) {},
+            unread: 0,
+            avatarApiService: api,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsNothing);
+    expect(find.text('S'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

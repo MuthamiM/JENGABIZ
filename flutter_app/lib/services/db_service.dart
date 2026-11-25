@@ -743,6 +743,9 @@ class JengaDB {
     await prefs.setString('current_user_id', user.id);
     await _persistItemsLocally();
     await NotificationCenterService.instance.setAccountScope(user.email);
+    unawaited(ProfileImageCacheService.instance
+        .ensureSynced(user.id.trim().toLowerCase(), forceRemote: true)
+        .catchError((_) {}));
     return user;
   }
 
@@ -823,6 +826,7 @@ class JengaDB {
   Future<void> logout() async {
     currentUser = null;
     shouldResumeSavedSession = false;
+    ProfileImageCacheService.instance.clearMemory();
     final deviceToken = FirebasePushService.instance.currentToken;
     final apiLogout =
         JengaApiService.instance.logoutAccount(deviceToken: deviceToken);
@@ -840,6 +844,7 @@ class JengaDB {
     await JengaApiService.instance.clearSession();
     currentUser = null;
     shouldResumeSavedSession = false;
+    ProfileImageCacheService.instance.clearMemory();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('current_user_id');
     await NotificationCenterService.instance.setAccountScope(null);

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -143,7 +142,8 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       NotificationCenterService.instance.clearPendingOpenNotification();
       setState(() {
         _expandNotificationId = openId;
-        _notificationOpenSeq = NotificationCenterService.instance.openRequestSeq;
+        _notificationOpenSeq =
+            NotificationCenterService.instance.openRequestSeq;
         screen = AppScreen.notifications;
       });
       return;
@@ -170,7 +170,9 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
         await JengaDB.instance.syncStockWithServer();
       }
       if (JengaApiService.instance.authToken != null) {
-        unawaited(JengaDB.instance.syncPendingProfileImage().catchError((_) => false));
+        unawaited(JengaDB.instance
+            .syncPendingProfileImage()
+            .catchError((_) => false));
       }
     } catch (_) {
       // The retry timer will try again when connectivity returns.
@@ -181,7 +183,9 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     try {
       if (JengaApiService.instance.authToken != null) {
         await JengaDB.instance.syncStockWithServer();
-        unawaited(JengaDB.instance.syncPendingProfileImage().catchError((_) => false));
+        unawaited(JengaDB.instance
+            .syncPendingProfileImage()
+            .catchError((_) => false));
       }
     } catch (_) {
       // A failed pull leaves the account's local inventory available offline.
@@ -279,8 +283,8 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
   }
 
   Future<void> _loadAvailableUpdate({bool openIfAvailable = false}) async {
-    final update =
-        await (widget.updateLoader ?? AppUpdateService.instance.availableRelease)();
+    final update = await (widget.updateLoader ??
+        AppUpdateService.instance.availableRelease)();
     if (!mounted || update == null) return;
     var dismissedUpdateCode = _dismissedUpdateCode;
     try {
@@ -448,13 +452,22 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
           initialStatusFilter: _stockStatusFilter,
         );
       case AppScreen.home:
-        return HomeScreen(go: go, unread: unread);
+        return HomeScreen(
+          go: go,
+          unread: unread,
+          avatarApiService: widget.apiService,
+        );
       case AppScreen.analytics:
-        return AnalyticsScreen(go: go, unread: unread);
+        return AnalyticsScreen(
+          go: go,
+          unread: unread,
+          avatarApiService: widget.apiService,
+        );
       case AppScreen.profile:
         return ProfileScreen(
             go: go,
             unread: unread,
+            apiService: widget.apiService,
             onCheckForUpdates: _openAppUpdates,
             onSignInAgain: _handleRejectedSession,
             onLogout: () {
@@ -545,11 +558,17 @@ class RoundBtn extends StatelessWidget {
 }
 
 class AppHeader extends StatelessWidget {
-  const AppHeader(
-      {super.key, required this.go, required this.unread, this.onBack});
+  const AppHeader({
+    super.key,
+    required this.go,
+    required this.unread,
+    this.onBack,
+    this.avatarApiService,
+  });
   final void Function(AppScreen) go;
   final int unread;
   final VoidCallback? onBack;
+  final JengaApiService? avatarApiService;
 
   @override
   Widget build(BuildContext context) {
@@ -560,7 +579,7 @@ class AppHeader extends StatelessWidget {
             ? RoundBtn(icon: Icons.arrow_back_rounded, onTap: onBack!)
             : GestureDetector(
                 onTap: () => go(AppScreen.profile),
-                child: const Avatar(size: 46)),
+                child: Avatar(size: 46, apiService: avatarApiService)),
         Row(children: [
           RoundBtn(
               icon: Icons.notifications_none_rounded,
@@ -576,38 +595,161 @@ class AppHeader extends StatelessWidget {
   }
 }
 
-class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.size, this.letter});
+class Avatar extends StatefulWidget {
+  const Avatar({
+    super.key,
+    required this.size,
+    this.letter,
+    this.apiService,
+    this.showBorder = false,
+  });
+
   final double size;
   final String? letter;
+  final JengaApiService? apiService;
+  final bool showBorder;
+
+  @override
+  State<Avatar> createState() => _AvatarState();
+}
+
+class _AvatarState extends State<Avatar> {
+  String _lastSyncedOwner = '';
+
+  String get _ownerId => (JengaDB.instance.currentUser?.id ??
+          (widget.apiService ?? JengaApiService.instance).sessionEmail ??
+          '')
+      .trim()
+      .toLowerCase();
+
+  @override
+  void initState() {
+    super.initState();
+    ProfileImageCacheService.instance.addListener(_onCacheChanged);
+    _triggerSyncIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(covariant Avatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _triggerSyncIfNeeded();
+  }
+
+  @override
+  void dispose() {
+    ProfileImageCacheService.instance.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _triggerSyncIfNeeded() {
+    final ownerId = _ownerId;
+    if (ownerId.isEmpty || ownerId == _lastSyncedOwner) return;
+    _lastSyncedOwner = ownerId;
+    unawaited(
+      ProfileImageCacheService.instance
+          .ensureSynced(ownerId, api: widget.apiService)
+          .catchError((_) {}),
+    );
+  }
+
+  Widget _defaultCircle(double innerSize, String initial) {
+    return Container(
+      width: innerSize,
+      height: innerSize,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient:
+            LinearGradient(colors: [Color(0xFF1E6BFF), Color(0xFF60A5FA)]),
+      ),
+      alignment: Alignment.center,
+      child: Container(
+        width: innerSize * .54,
+        height: innerSize * .54,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          initial,
+          style: TextStyle(
+            fontSize: innerSize * .26,
+            fontWeight: FontWeight.w900,
+            color: const Color(0xFF1E6BFF),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final user = JengaDB.instance.currentUser;
-    final initial = letter ??
+    final initial = widget.letter ??
         (user != null && user.name.trim().isNotEmpty
             ? user.name.trim()[0].toUpperCase()
             : 'J');
+    final ownerId = _ownerId;
+    final cache = ProfileImageCacheService.instance;
+    final entry = ownerId.isEmpty ? null : cache.entryFor(ownerId);
+    final bytes = ownerId.isEmpty ? null : cache.bytesFor(ownerId);
+    final borderPad = widget.showBorder ? 3.0 : (entry != null ? 1.5 : 0.0);
+    final innerSize = math.max(1.0, widget.size - borderPad * 2);
+
+    Widget content;
+    if (bytes != null) {
+      content = ClipOval(
+        child: SizedBox.square(
+          dimension: innerSize,
+          child: Image.memory(
+            bytes,
+            key: ValueKey('avatar-mem-$ownerId-${cache.revision}'),
+            width: innerSize,
+            height: innerSize,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          ),
+        ),
+      );
+    } else if (entry != null) {
+      content = ClipOval(
+        child: SizedBox.square(
+          dimension: innerSize,
+          child: Image.file(
+            entry.file,
+            key: ValueKey('avatar-file-$ownerId-${cache.revision}'),
+            width: innerSize,
+            height: innerSize,
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    } else {
+      content = _defaultCircle(innerSize, initial);
+    }
+
+    if (borderPad == 0) {
+      return SizedBox.square(dimension: widget.size, child: content);
+    }
+
     return Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient:
-              LinearGradient(colors: [Color(0xFF1E6BFF), Color(0xFF60A5FA)])),
-      alignment: Alignment.center,
-      child: Container(
-        width: size * .54,
-        height: size * .54,
-        decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(size)),
-        alignment: Alignment.center,
-        child: Text(initial,
-            style: TextStyle(
-                fontSize: size * .26,
-                fontWeight: FontWeight.w900,
-                color: const Color(0xFF1E6BFF))),
+      width: widget.size,
+      height: widget.size,
+      padding: EdgeInsets.all(borderPad),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white,
+        border:
+            widget.showBorder ? null : Border.all(color: kTintBlue, width: 1.5),
+        boxShadow: widget.showBorder
+            ? const [BoxShadow(color: kShadow, blurRadius: 12)]
+            : null,
       ),
+      child: content,
     );
   }
 }
@@ -1014,9 +1156,15 @@ class PiePainter extends CustomPainter {
 }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.go, required this.unread});
+  const HomeScreen({
+    super.key,
+    required this.go,
+    required this.unread,
+    this.avatarApiService,
+  });
   final void Function(AppScreen) go;
   final int unread;
+  final JengaApiService? avatarApiService;
 
   @override
   Widget build(BuildContext context) {
@@ -1083,7 +1231,7 @@ class HomeScreen extends StatelessWidget {
     }
 
     return NavShell(active: AppScreen.home, go: go, children: [
-      AppHeader(go: go, unread: unread),
+      AppHeader(go: go, unread: unread, avatarApiService: avatarApiService),
       Text.rich(
           TextSpan(children: [
             const TextSpan(text: 'Hi, '),
@@ -1102,7 +1250,7 @@ class HomeScreen extends StatelessWidget {
       GestureDetector(
         onTap: () => go(AppScreen.analytics),
         child: Container(
-          height: 116,
+          constraints: const BoxConstraints(minHeight: 116),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
@@ -1165,7 +1313,7 @@ class HomeScreen extends StatelessWidget {
       GestureDetector(
         onTap: () => go(AppScreen.analytics),
         child: Container(
-          height: 106,
+          constraints: const BoxConstraints(minHeight: 110),
           padding: const EdgeInsets.all(20),
           decoration: cardDeco(Colors.white),
           child: Row(children: [
@@ -1370,9 +1518,15 @@ class DBPiePainter extends CustomPainter {
 // ---------- Analytics ----------
 
 class AnalyticsScreen extends StatefulWidget {
-  const AnalyticsScreen({super.key, required this.go, required this.unread});
+  const AnalyticsScreen({
+    super.key,
+    required this.go,
+    required this.unread,
+    this.avatarApiService,
+  });
   final void Function(AppScreen) go;
   final int unread;
+  final JengaApiService? avatarApiService;
 
   @override
   State<AnalyticsScreen> createState() => _AnalyticsScreenState();
@@ -1796,24 +1950,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _preferencesLoaded = false;
   Map<String, dynamic>? _referralSummary;
   String? _referralError;
-  File? _profileImageFile;
-  String? _profileImageType;
   bool _profileImageBusy = false;
 
   JengaApiService get _api => widget.apiService ?? JengaApiService.instance;
 
-  String get _profileImageOwnerId => (JengaDB.instance.currentUser?.id ??
-          _api.sessionEmail ??
-          'account')
-      .trim()
-      .toLowerCase();
+  String get _profileImageOwnerId =>
+      (JengaDB.instance.currentUser?.id ?? _api.sessionEmail ?? 'account')
+          .trim()
+          .toLowerCase();
+
+  ProfileImageCacheEntry? get _profileImageEntry =>
+      ProfileImageCacheService.instance.entryFor(_profileImageOwnerId);
+
+  String? get _profileImageType => _profileImageEntry?.imageType;
 
   String get _referralCacheKey {
-    final owner = (JengaDB.instance.currentUser?.id ??
-            _api.sessionEmail ??
-            'account')
-        .trim()
-        .toLowerCase();
+    final owner =
+        (JengaDB.instance.currentUser?.id ?? _api.sessionEmail ?? 'account')
+            .trim()
+            .toLowerCase();
     return 'jengabiz_referral_summary_${Uri.encodeComponent(owner)}';
   }
 
@@ -1839,91 +1994,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    ProfileImageCacheService.instance.addListener(_onProfileImageChanged);
     _loadPreferences();
     unawaited(_loadProfileImage());
   }
 
   @override
   void dispose() {
+    ProfileImageCacheService.instance.removeListener(_onProfileImageChanged);
     super.dispose();
   }
 
+  void _onProfileImageChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _loadProfileImage() async {
-    final ownerId = _profileImageOwnerId;
-    final cache = ProfileImageCacheService.instance;
-    ProfileImageCacheEntry? saved;
-    try {
-      saved = await cache.read(ownerId);
-    } catch (_) {}
-    if (!mounted) return;
-    if (saved != null) {
-      setState(() {
-        _profileImageFile = saved!.file;
-        _profileImageType = saved.imageType;
-      });
-    }
-    if (_api.authToken == null) return;
-
-    if (saved != null && saved.pendingUpload) {
-      try {
-        final bytes = await saved.file.readAsBytes();
-        final mimeType =
-            saved.mimeType ?? ProfileImageCacheService.detectMimeType(bytes);
-        if (bytes.isNotEmpty &&
-            bytes.length <= _maxProfileImageBytes &&
-            mimeType != null) {
-          final uploaded = await _api.uploadProfileImage(
-            imageType: saved.imageType,
-            mimeType: mimeType,
-            imageData: bytes,
-          );
-          if (uploaded?.succeeded == true) {
-            await cache.save(
-              ownerId,
-              bytes: bytes,
-              imageType: saved.imageType,
-              mimeType: mimeType,
-              pendingUpload: false,
-            );
-          }
-        }
-      } catch (_) {}
-      return;
-    }
-
-    final remote = await _api.fetchProfileImageStatus();
-    if (!mounted) return;
-    if (remote.notFound) {
-      if (saved != null) {
-        try {
-          await cache.remove(ownerId);
-        } catch (_) {}
-        if (!mounted) return;
-        setState(() {
-          _profileImageFile = null;
-          _profileImageType = null;
-        });
-      }
-      return;
-    }
-    final image = remote.image;
-    if (image == null) return;
-    try {
-      final entry = await cache.save(
-        ownerId,
-        bytes: image.bytes,
-        imageType: image.imageType,
-        mimeType: image.mimeType,
-        pendingUpload: false,
-      );
-      if (!mounted) return;
-      setState(() {
-        _profileImageFile = entry.file;
-        _profileImageType = entry.imageType;
-      });
-    } catch (_) {
-      // Keep showing the existing local photo if the cache cannot be updated.
-    }
+    await ProfileImageCacheService.instance.ensureSynced(
+      _profileImageOwnerId,
+      api: _api,
+      forceRemote: true,
+    );
   }
 
   String? _resolvePickedMimeType(XFile file, Uint8List bytes) {
@@ -1947,11 +2038,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Widget _buildPhotoTypeChip({
+    required String value,
+    required String label,
+    required IconData icon,
+    required String selectedType,
+    required VoidCallback onSelected,
+  }) {
+    final isSelected = selectedType == value;
+    return Expanded(
+      child: ChoiceChip(
+        showCheckmark: false,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 6),
+              Text(label),
+            ],
+          ),
+        ),
+        selected: isSelected,
+        onSelected: (_) => onSelected(),
+        selectedColor: kTintBlue,
+        labelStyle: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          color: isSelected ? kBlue : kInk,
+        ),
+        side: BorderSide(
+          color: isSelected ? kBlue : const Color(0xFFE1E4EF),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showProfilePhotoOptions() async {
     if (_profileImageBusy) return;
     var selectedType = _profileImageType == 'shop' ? 'shop' : 'personal';
-    final choice =
-        await showModalBottomSheet<({String action, String imageType, ImageSource? source})>(
+    final choice = await showModalBottomSheet<
+        ({String action, String imageType, ImageSource? source})>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -1992,57 +2123,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    for (final option in const [
-                      (
-                        type: 'personal',
-                        label: 'Personal photo',
-                        icon: Icons.person_outline_rounded,
-                      ),
-                      (
-                        type: 'shop',
-                        label: 'Shop photo',
-                        icon: Icons.storefront_outlined,
-                      ),
-                    ]) ...[
-                      if (option.type == 'shop') const SizedBox(width: 10),
-                      Expanded(
-                        child: ChoiceChip(
-                          showCheckmark: false,
-                          label: SizedBox(
-                            width: double.infinity,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(option.icon, size: 16),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    option.label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          selected: selectedType == option.type,
-                          onSelected: (_) =>
-                              setSheetState(() => selectedType = option.type),
-                          selectedColor: kTintBlue,
-                          labelStyle: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: selectedType == option.type ? kBlue : kInk,
-                          ),
-                          side: BorderSide(
-                            color: selectedType == option.type
-                                ? kBlue
-                                : const Color(0xFFE1E4EF),
-                          ),
-                        ),
-                      ),
-                    ],
+                    _buildPhotoTypeChip(
+                      value: 'personal',
+                      label: 'Personal photo',
+                      icon: Icons.person_outline_rounded,
+                      selectedType: selectedType,
+                      onSelected: () =>
+                          setSheetState(() => selectedType = 'personal'),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildPhotoTypeChip(
+                      value: 'shop',
+                      label: 'Shop photo',
+                      icon: Icons.storefront_outlined,
+                      selectedType: selectedType,
+                      onSelected: () =>
+                          setSheetState(() => selectedType = 'shop'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -2086,7 +2183,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     source: ImageSource.camera,
                   )),
                 ),
-                if (_profileImageFile != null)
+                if (_profileImageEntry != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
@@ -2167,7 +2264,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final typeLabel = imageType == 'shop' ? 'Shop photo' : 'Personal photo';
 
       if (_api.authToken == null) {
-        final entry = await cache.save(
+        await cache.save(
           ownerId,
           bytes: bytes,
           imageType: imageType,
@@ -2175,10 +2272,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           pendingUpload: true,
         );
         if (!mounted) return;
-        setState(() {
-          _profileImageFile = entry.file;
-          _profileImageType = entry.imageType;
-        });
         _showPhotoMessage(
             '$typeLabel saved on this phone. Sign in online to sync it.');
         return;
@@ -2192,7 +2285,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
 
       if (response?.succeeded == true) {
-        final entry = await cache.save(
+        await cache.save(
           ownerId,
           bytes: bytes,
           imageType: imageType,
@@ -2200,10 +2293,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           pendingUpload: false,
         );
         if (!mounted) return;
-        setState(() {
-          _profileImageFile = entry.file;
-          _profileImageType = entry.imageType;
-        });
         _showPhotoMessage('$typeLabel uploaded.');
         return;
       }
@@ -2222,7 +2311,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      final entry = await cache.save(
+      await cache.save(
         ownerId,
         bytes: bytes,
         imageType: imageType,
@@ -2230,10 +2319,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         pendingUpload: true,
       );
       if (!mounted) return;
-      setState(() {
-        _profileImageFile = entry.file;
-        _profileImageType = entry.imageType;
-      });
       _showPhotoMessage(
           '$typeLabel saved on this phone. It will sync when online.');
     } finally {
@@ -2242,7 +2327,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _removeProfileImage() async {
-    if (_profileImageBusy || _profileImageFile == null) return;
+    if (_profileImageBusy || _profileImageEntry == null) return;
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -2271,16 +2356,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final removed = await _api.removeProfileImage();
         if (!mounted) return;
         if (!removed) {
-          _showPhotoMessage('Could not reach your account. The photo was kept.');
+          _showPhotoMessage(
+              'Could not reach your account. The photo was kept.');
           return;
         }
       }
       await ProfileImageCacheService.instance.remove(_profileImageOwnerId);
       if (!mounted) return;
-      setState(() {
-        _profileImageFile = null;
-        _profileImageType = null;
-      });
       _showPhotoMessage('Profile photo removed.');
     } finally {
       if (mounted) setState(() => _profileImageBusy = false);
@@ -2288,7 +2370,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _profilePhoto() {
-    final imageFile = _profileImageFile;
+    final hasPhoto = _profileImageEntry != null;
     return SizedBox(
       width: 84,
       height: 84,
@@ -2297,31 +2379,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           GestureDetector(
             onTap: _profileImageBusy ? null : _showProfilePhotoOptions,
-            child: Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: kTintBlue,
-                border: Border.all(color: Colors.white, width: 3),
-                boxShadow: const [BoxShadow(color: kShadow, blurRadius: 12)],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: imageFile != null
-                  ? Image.file(imageFile, fit: BoxFit.cover)
-                  : const Avatar(size: 84),
-            ),
+            child: Avatar(size: 84, showBorder: true, apiService: _api),
           ),
           Positioned(
             right: 0,
             bottom: 0,
             child: Tooltip(
-              message: imageFile == null
+              message: !hasPhoto
                   ? 'Upload profile photo'
                   : 'Update or remove profile photo',
               child: IconButton(
-                onPressed:
-                    _profileImageBusy ? null : _showProfilePhotoOptions,
+                onPressed: _profileImageBusy ? null : _showProfilePhotoOptions,
                 icon: _profileImageBusy
                     ? const SizedBox(
                         width: 14,
@@ -2859,7 +2927,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             children: [
               Center(child: _profilePhoto()),
-              if (_profileImageFile != null) ...[
+              if (_profileImageEntry != null) ...[
                 Text(
                   _profileImageType == 'shop' ? 'Shop photo' : 'Personal photo',
                   style: const TextStyle(fontSize: 11, color: kMuted),
