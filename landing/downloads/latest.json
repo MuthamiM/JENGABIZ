@@ -1,12 +1,12 @@
 {
-  "version_name": "1.1.16",
-  "version_code": 27,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.16/JengaBiz-1.1.16.apk",
-  "sha256": "ba236197b02ebf148a5470918a35ed89da5c42715430d8c5f2d8d8deedd90469",
+  "version_name": "1.1.17",
+  "version_code": 28,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.17/JengaBiz-1.1.17.apk",
+  "sha256": "85a8f42f720546e7029d14aa69610ce71d71b0463671661ed1b19304d9498a9c",
   "release_notes": [
-    "Profile picture now persists across app data and cache clearing: restored instantly on sign-in.",
-    "Upgraded google_fonts dependency for Flutter SDK compatibility.",
-    "UI fixes for Material widget hierarchy on profile and settings screens.",
-    "Offline and online performance optimizations: in-memory LRU stock image cache, debounced offline inventory changes, and pre-warmed profile cache."
+    "Added Smart Business Calculator with 4 core MSME financial functions: Profit Margin & Markup, KRA eTIMS & Tax (16% VAT, 1.5% TOT, 5% WHT), Mobile & Hustler Loan Repayment, and Break-Even Daily Survival Target.",
+    "Added interactive quick arithmetic keypad for fast scratchpad calculations.",
+    "Integrated quick-access calculator buttons in the top app header, main dashboard, and profile tools menu.",
+    "Performance and layout optimizations across all Android screen sizes."
   ]
 }

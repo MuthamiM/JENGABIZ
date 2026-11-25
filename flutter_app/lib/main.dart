@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'legal_documents.dart';
 import 'screens/auth_screen.dart';
+import 'screens/calculator_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/stock_screen.dart';
 import 'screens/update_screen.dart';
@@ -80,6 +81,7 @@ enum AppScreen {
   notifications,
   stock,
   update,
+  calculator,
 }
 
 class Root extends StatefulWidget {
@@ -506,6 +508,10 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
           expandNotificationId: _expandNotificationId,
           openRequestSeq: _notificationOpenSeq,
         );
+      case AppScreen.calculator:
+        return CalculatorScreen(
+          onBack: () => go(AppScreen.home),
+        );
     }
   }
 
@@ -600,6 +606,10 @@ class AppHeader extends StatelessWidget {
                 onTap: () => go(AppScreen.profile),
                 child: Avatar(size: 46, apiService: avatarApiService)),
         Row(children: [
+          RoundBtn(
+              icon: Icons.calculate_outlined,
+              onTap: () => go(AppScreen.calculator)),
+          const SizedBox(width: 9),
           RoundBtn(
               icon: Icons.notifications_none_rounded,
               badge: unread,
@@ -1414,7 +1424,71 @@ class HomeScreen extends StatelessWidget {
               () => go(AppScreen.stock)),
         ]),
       ),
-      const SizedBox(height: 25),
+      const SizedBox(height: 16),
+      // ---- Business Calculator Card ----
+      GestureDetector(
+        onTap: () => go(AppScreen.calculator),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1E2A38), Color(0xFF2C3E50)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x1E1E2A38),
+                blurRadius: 16,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(Icons.calculate_rounded,
+                    color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Business Calculator',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Margin • KRA eTIMS • Loans • Break-Even',
+                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios_rounded,
+                  color: Colors.white70, size: 13),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 20),
       // ---- Top Sellers / Latest Orders ----
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         const Text('Top Sellers',
@@ -3044,6 +3118,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 kBlue,
                 'Manage Stock & Inventory (${items.length} Items)',
                 () => widget.go(AppScreen.stock),
+              ),
+              const Divider(height: 1, indent: 68, color: Color(0xFFF1F3F9)),
+              _row(
+                Icons.calculate_outlined,
+                const Color(0xFFFFF0DC),
+                const Color(0xFFE65100),
+                'Business & Tax Calculator',
+                () => widget.go(AppScreen.calculator),
               ),
               const Divider(height: 1, indent: 68, color: Color(0xFFF1F3F9)),
               _row(
