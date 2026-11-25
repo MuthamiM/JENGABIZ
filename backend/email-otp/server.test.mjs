@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes, scryptSync } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -656,7 +656,7 @@ test('legacy app devices receive an update push after login while current apps d
   });
 });
 
-test('profile photo uploads save into the TeleDrive directory, replace cleanly, and delete on remove', async () => {
+test('profile photo uploads update active photo and preserve per-user collection in TeleDrive', async () => {
   const teledriveDir = mkdtempSync(join(tmpdir(), 'jengabiz-teledrive-'));
   const samplePng = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -665,6 +665,7 @@ test('profile photo uploads save into the TeleDrive directory, replace cleanly, 
     0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
   ]);
   const sampleJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xd9]);
+  const updatedJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x01, 0xff, 0xd9]);
 
   try {
     await withService({
@@ -703,6 +704,24 @@ test('profile photo uploads save into the TeleDrive directory, replace cleanly, 
       const token = registered.body.sessionToken;
       const accountId = registered.body.user.id;
 
+      await post(baseUrl, '/email-auth/request-otp', { email: 'other@example.com' });
+      const verificationB = await post(baseUrl, '/email-auth/verify-otp', {
+        email: 'other@example.com',
+        otp: '246810',
+      });
+      const registeredB = await post(baseUrl, '/email-auth/register', {
+        email: 'other@example.com',
+        verificationToken: verificationB.body.verificationToken,
+        name: 'Second Owner',
+        shopName: 'Second Shop',
+        phone: '',
+        password: 'correct horse battery',
+        items: [],
+      });
+      assert.equal(registeredB.status, 201);
+      const tokenB = registeredB.body.sessionToken;
+      const accountIdB = registeredB.body.user.id;
+
       const badType = await request(baseUrl, '/email-auth/profile/image', {
         method: 'PUT',
         token,
@@ -737,20 +756,15 @@ test('profile photo uploads save into the TeleDrive directory, replace cleanly, 
       assert.equal(uploadPersonal.status, 200);
       assert.equal(uploadPersonal.body.imageType, 'personal');
       assert.equal(uploadPersonal.body.storage, 'teledrive');
+      assert.equal(uploadPersonal.body.collectionCount, 1);
 
-      const personalFilePath = join(teledriveDir, accountId, 'personal.png');
-      assert.equal(existsSync(personalFilePath), true);
+      const userDir = join(teledriveDir, accountId);
+      const filesAfterFirst = readdirSync(userDir);
+      assert.equal(filesAfterFirst.length, 1);
+      const personalFilePath = join(userDir, filesAfterFirst[0]);
       assert.deepEqual(readFileSync(personalFilePath), samplePng);
 
-      const fetchedPersonal = await fetch(`${baseUrl}/email-auth/profile/image`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      assert.equal(fetchedPersonal.status, 200);
-      assert.equal(fetchedPersonal.headers.get('content-type'), 'image/png');
-      assert.equal(fetchedPersonal.headers.get('x-profile-image-type'), 'personal');
-      assert.deepEqual(Buffer.from(await fetchedPersonal.arrayBuffer()), samplePng);
-
-      // Replacing with Shop photo JPEG saves shop.jpg and removes old personal.png.
+      // Changing pic updates active profile photo AND keeps the previous upload in this user's collection.
       const uploadShop = await request(baseUrl, '/email-auth/profile/image', {
         method: 'PUT',
         token,
@@ -763,20 +777,56 @@ test('profile photo uploads save into the TeleDrive directory, replace cleanly, 
       assert.equal(uploadShop.status, 200);
       assert.equal(uploadShop.body.imageType, 'shop');
       assert.equal(uploadShop.body.storage, 'teledrive');
+      assert.equal(uploadShop.body.collectionCount, 2);
 
-      const shopFilePath = join(teledriveDir, accountId, 'shop.jpg');
-      assert.equal(existsSync(shopFilePath), true);
-      assert.deepEqual(readFileSync(shopFilePath), sampleJpeg);
-      assert.equal(existsSync(personalFilePath), false);
+      // Changing the same type again keeps all 3 in this user's collection.
+      const uploadShopAgain = await request(baseUrl, '/email-auth/profile/image', {
+        method: 'PUT',
+        token,
+        payload: {
+          imageType: 'shop',
+          mimeType: 'image/jpeg',
+          imageBase64: updatedJpeg.toString('base64'),
+        },
+      });
+      assert.equal(uploadShopAgain.status, 200);
+      assert.equal(uploadShopAgain.body.collectionCount, 3);
 
-      const fetchedShop = await fetch(`${baseUrl}/email-auth/profile/image`, {
+      const filesAfterChanges = readdirSync(userDir);
+      assert.equal(filesAfterChanges.length, 3);
+      assert.equal(existsSync(personalFilePath), true);
+
+      const fetchedActive = await fetch(`${baseUrl}/email-auth/profile/image`, {
         headers: { authorization: `Bearer ${token}` },
       });
-      assert.equal(fetchedShop.status, 200);
-      assert.equal(fetchedShop.headers.get('content-type'), 'image/jpeg');
-      assert.equal(fetchedShop.headers.get('x-profile-image-type'), 'shop');
-      assert.deepEqual(Buffer.from(await fetchedShop.arrayBuffer()), sampleJpeg);
+      assert.equal(fetchedActive.status, 200);
+      assert.equal(fetchedActive.headers.get('content-type'), 'image/jpeg');
+      assert.equal(fetchedActive.headers.get('x-profile-image-type'), 'shop');
+      assert.deepEqual(Buffer.from(await fetchedActive.arrayBuffer()), updatedJpeg);
 
+      const listCollection = await fetch(`${baseUrl}/email-auth/profile/images`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(listCollection.status, 200);
+      const listJson = await listCollection.json();
+      assert.equal(listJson.collection.length, 3);
+      assert.equal(listJson.collection.filter((entry) => entry.isActive).length, 1);
+
+      // Separate account saves into its own isolated TeleDrive collection folder.
+      const uploadOther = await request(baseUrl, '/email-auth/profile/image', {
+        method: 'PUT',
+        token: tokenB,
+        payload: {
+          imageType: 'personal',
+          mimeType: 'image/png',
+          imageBase64: samplePng.toString('base64'),
+        },
+      });
+      assert.equal(uploadOther.status, 200);
+      assert.equal(uploadOther.body.collectionCount, 1);
+      assert.equal(readdirSync(join(teledriveDir, accountIdB)).length, 1);
+
+      // Removing current active photo clears GET /email-auth/profile/image while keeping prior collection entries intact.
       const deleted = await request(baseUrl, '/email-auth/profile/image', {
         method: 'DELETE',
         token,
@@ -784,8 +834,7 @@ test('profile photo uploads save into the TeleDrive directory, replace cleanly, 
       });
       assert.equal(deleted.status, 200);
       assert.equal(deleted.body.removed, true);
-      assert.equal(existsSync(shopFilePath), false);
-      assert.equal(existsSync(join(teledriveDir, accountId)), false);
+      assert.equal(readdirSync(userDir).length, 2);
 
       const afterDelete = await fetch(`${baseUrl}/email-auth/profile/image`, {
         headers: { authorization: `Bearer ${token}` },

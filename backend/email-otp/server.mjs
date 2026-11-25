@@ -309,6 +309,8 @@ export function createEmailOtpHandler({
       const path = new URL(request.url || '/', 'http://localhost').pathname;
       const stockImageMatch = path.match(/^\/email-auth\/stock\/images\/([A-Za-z0-9_-]{1,128})$/);
       const profileImageMatch = path === '/email-auth/profile/image';
+      const profileCollectionMatch = path === '/email-auth/profile/images';
+      const profileCollectionItemMatch = path.match(/^\/email-auth\/profile\/images\/([A-Za-z0-9_-]{1,128})$/);
       const adminUserMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})$/);
       const adminStatusMatch = path.match(/^\/email-auth\/admin\/users\/([A-Za-z0-9_-]{1,128})\/status$/);
       if (request.method === 'GET' && path === '/health') {
@@ -334,12 +336,18 @@ export function createEmailOtpHandler({
         '/email-auth/referrals/location',
         ADMIN_LOGIN_PATH,
       ];
-      const isAccountPath = accountPaths.includes(path) || isAdminRoute(path) || stockImageMatch !== null;
+      const isAccountPath = accountPaths.includes(path) ||
+        isAdminRoute(path) ||
+        stockImageMatch !== null ||
+        profileCollectionMatch ||
+        profileCollectionItemMatch !== null;
       const allowed = otpPaths.includes(path) || path === supportRequestPath || isAccountPath;
       const allowedMethod = stockImageMatch || profileImageMatch
         ? (stockImageMatch
           ? ['GET', 'PUT'].includes(request.method)
           : ['GET', 'PUT', 'DELETE'].includes(request.method))
+        : (profileCollectionMatch || profileCollectionItemMatch)
+          ? request.method === 'GET'
         : path === ADMIN_LOGIN_PATH || path === ADMIN_LOGOUT_PATH
           ? request.method === 'POST'
         : adminStatusMatch
@@ -696,6 +704,29 @@ export function createEmailOtpHandler({
             imageUrl: `stock-image:${itemId}`,
           });
         }
+        if (profileCollectionMatch) {
+          return json(response, 200, {
+            success: true,
+            collection: accounts.listProfileImageCollection(session.id),
+          });
+        }
+        if (profileCollectionItemMatch) {
+          const entryId = profileCollectionItemMatch[1];
+          const storedImage = accounts.getProfileImage(session.id, entryId);
+          if (!storedImage) {
+            return json(response, 404, { success: false, message: 'Profile photo was not found.' });
+          }
+          const imageData = Buffer.from(storedImage.imageData);
+          response.writeHead(200, {
+            'content-type': storedImage.mimeType,
+            'content-length': imageData.length,
+            'x-profile-image-type': storedImage.imageType,
+            'cache-control': 'private, no-store',
+            'x-content-type-options': 'nosniff',
+          });
+          response.end(imageData);
+          return;
+        }
         if (profileImageMatch) {
           if (request.method === 'GET') {
             const storedImage = accounts.getProfileImage(session.id);
@@ -736,8 +767,10 @@ export function createEmailOtpHandler({
             }
             return json(response, 200, {
               success: true,
+              id: saved.id,
               imageType: saved.imageType,
               storage: saved.storage,
+              collectionCount: saved.collectionCount,
             });
           }
           const removed = accounts.removeProfileImage(session.id);

@@ -28,6 +28,7 @@ class _StockScreenState extends State<StockScreen> {
   String _statusFilter =
       'All'; // 'All', 'In Stock', 'Low Stock', 'Out of Stock'
   StockSort _sort = StockSort.stockLow;
+  bool _exportingPdf = false;
 
   @override
   void initState() {
@@ -324,6 +325,8 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Future<void> _exportStockPdf() async {
+    if (_exportingPdf) return;
+    setState(() => _exportingPdf = true);
     final messenger = ScaffoldMessenger.of(context);
     final db = JengaDB.instance;
     final revenue = db.items
@@ -338,6 +341,7 @@ class _StockScreenState extends State<StockScreen> {
         revenue: revenue,
         cost: cost,
         unitsSold: units,
+        ownerId: db.currentUser?.id ?? db.inventoryOwnerId,
       );
     } catch (_) {
       if (!mounted || !messenger.mounted) return;
@@ -345,6 +349,8 @@ class _StockScreenState extends State<StockScreen> {
         const SnackBar(
             content: Text('Could not export the stock PDF. Please try again.')),
       );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
     }
   }
 

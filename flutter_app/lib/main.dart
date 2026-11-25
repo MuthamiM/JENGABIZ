@@ -1608,6 +1608,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         revenue: revenue,
         cost: cost,
         unitsSold: units,
+        ownerId: db.currentUser?.id ?? db.inventoryOwnerId,
       );
     } catch (_) {
       if (!mounted || !messenger.mounted) return;

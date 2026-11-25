@@ -1,11 +1,10 @@
 {
-  "version_name": "1.1.13",
-  "version_code": 24,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.13/JengaBiz-1.1.13.apk",
-  "sha256": "18e4e0e2ca6a9add6b95ee68560bad87be3dbd9e6f7fda018cc72d172af0c3fc",
+  "version_name": "1.1.14",
+  "version_code": 25,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.14/JengaBiz-1.1.14.apk",
+  "sha256": "101d1ab9ab35a2b6b6d54fc48c2c091be8509d2024214c9e709944a52fcedabf",
   "release_notes": [
-    "Fixed circular profile photo cropping on Profile and live avatar display in the Home header.",
-    "Synced profile photos reactively across screens and cleared cached images cleanly on sign-out.",
-    "Improved dashboard card and photo-type chip sizing to prevent layout overflows."
+    "Stock PDF exports now render strictly in black and white with product images.",
+    "Profile photo changes update your active avatar and preserve each user's photo collection in TeleDrive."
   ]
 }

@@ -291,10 +291,12 @@ void main() {
         'path': uri.path,
         'payload': Map<String, dynamic>.from(payload),
       });
-      return const JengaApiResponse(200, {
+      final putCount = requests.where((r) => r['method'] == 'PUT').length;
+      return JengaApiResponse(200, {
         'success': true,
-        'imageType': 'shop',
+        'imageType': payload['imageType']?.toString() ?? 'shop',
         'storage': 'teledrive',
+        'collectionCount': putCount,
       });
     });
     api.configure(
@@ -303,10 +305,14 @@ void main() {
     );
     api.sessionEmail = 'shop@example.com';
 
-    // Valid minimal 1x1 transparent PNG so Image.file decodes without error.
+    // Valid minimal 1x1 PNGs so Image.memory decodes without error.
     final samplePng = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     );
+    final updatedPng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    );
+    var pickCount = 0;
 
     final db = JengaDB.instance;
     db.currentUser = JengaUser(
@@ -327,11 +333,15 @@ void main() {
             unread: 0,
             onLogout: () {},
             apiService: api,
-            imagePickerOverride: (_) async => XFile.fromData(
-              samplePng,
-              mimeType: 'image/png',
-              name: 'shop.png',
-            ),
+            imagePickerOverride: (_) async {
+              pickCount++;
+              final bytes = pickCount == 1 ? samplePng : updatedPng;
+              return XFile.fromData(
+                bytes,
+                mimeType: 'image/png',
+                name: pickCount == 1 ? 'shop.png' : 'personal.png',
+              );
+            },
           ),
         ),
       ),
@@ -407,6 +417,62 @@ void main() {
     expect(homeSize.width, homeSize.height);
     expect(homeSize.width, lessThanOrEqualTo(46));
 
+    // Change pic on ProfileScreen to Personal photo and verify immediate update on both Profile and Home.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProfileScreen(
+            go: (_) {},
+            unread: 0,
+            onLogout: () {},
+            apiService: api,
+            imagePickerOverride: (_) async {
+              pickCount++;
+              final bytes = pickCount == 1 ? samplePng : updatedPng;
+              return XFile.fromData(
+                bytes,
+                mimeType: 'image/png',
+                name: pickCount == 1 ? 'shop.png' : 'personal.png',
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.camera_alt_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Personal photo'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose from gallery'));
+    for (var i = 0;
+        i < 20 && find.text('Personal photo uploaded.').evaluate().isEmpty;
+        i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Personal photo uploaded.'), findsOneWidget);
+    expect(find.text('Personal photo'), findsOneWidget);
+    expect(requests.where((r) => r['method'] == 'PUT'), hasLength(2));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeScreen(
+            go: (_) {},
+            unread: 0,
+            avatarApiService: api,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final updatedHomeImage = tester.widget<Image>(find.byType(Image));
+    expect((updatedHomeImage.image as MemoryImage).bytes, updatedPng);
+
     // Re-mount ProfileScreen and remove the uploaded photo.
     await tester.pumpWidget(
       MaterialApp(
@@ -441,6 +507,7 @@ void main() {
     expect(deleteRequests, hasLength(1));
     expect(deleteRequests.first['path'], '/email-auth/profile/image');
     expect(find.text('Profile photo removed.'), findsOneWidget);
+    expect(find.text('Personal photo'), findsNothing);
     expect(find.text('Shop photo'), findsNothing);
 
     // HomeScreen also reverts to default initial badge after removal.

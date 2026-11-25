@@ -130,6 +130,17 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
       storage_path TEXT,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS account_profile_image_collection (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      image_type TEXT NOT NULL CHECK (image_type IN ('personal', 'shop')),
+      mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+      image_data BLOB NOT NULL,
+      storage_path TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS profile_collection_account_idx
+      ON account_profile_image_collection(account_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS notification_devices (
       token TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -197,6 +208,31 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
   );
   if (!profileImageColumns.has('storage_path')) {
     db.exec('ALTER TABLE account_profile_images ADD COLUMN storage_path TEXT');
+  }
+  const unindexedProfiles = db.prepare(`
+    SELECT p.account_id, p.image_type, p.mime_type, p.image_data, p.storage_path, p.updated_at
+    FROM account_profile_images p
+    WHERE NOT EXISTS (
+      SELECT 1 FROM account_profile_image_collection c WHERE c.account_id = p.account_id
+    )
+  `).all();
+  if (unindexedProfiles.length) {
+    const seedCollection = db.prepare(`
+      INSERT INTO account_profile_image_collection
+        (id, account_id, image_type, mime_type, image_data, storage_path, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const row of unindexedProfiles) {
+      seedCollection.run(
+        randomUUID(),
+        row.account_id,
+        row.image_type,
+        row.mime_type,
+        row.image_data ?? Buffer.alloc(0),
+        row.storage_path ?? null,
+        row.updated_at,
+      );
+    }
   }
 
   const missingCodes = db.prepare(
@@ -363,25 +399,19 @@ export function createAccountStore(db, {
     return candidate;
   }
 
-  function cleanupAccountUploadFiles(accountId, keepFileName = null) {
+  function removeEmptyAccountDir(accountId) {
     if (!SAFE_ACCOUNT_ID.test(accountId)) return;
     const accountDir = safeUploadPath(accountId);
     if (!accountDir || !existsSync(accountDir)) return;
-    let remaining = 0;
-    for (const entry of readdirSync(accountDir, { withFileTypes: true })) {
-      if (!entry.isFile()) {
-        remaining += 1;
-        continue;
+    const entries = readdirSync(accountDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.startsWith('.tmp-')) {
+        try {
+          unlinkSync(join(accountDir, entry.name));
+        } catch {}
       }
-      if (keepFileName && (entry.name === keepFileName || entry.name.startsWith('.tmp-'))) {
-        remaining += 1;
-        continue;
-      }
-      try {
-        unlinkSync(join(accountDir, entry.name));
-      } catch {}
     }
-    if (remaining === 0 && !keepFileName) {
+    if (readdirSync(accountDir).length === 0) {
       try {
         rmdirSync(accountDir);
       } catch {}
@@ -1164,8 +1194,37 @@ export function createAccountStore(db, {
     const account = db.prepare('SELECT 1 AS found FROM accounts WHERE id = ?').get(accountId);
     if (!account) return null;
 
+    const entryId = randomUUID();
+    const recordActiveAndCollection = (storedBlob, relativePath) => withTransaction(() => {
+      db.prepare(`
+        INSERT INTO account_profile_image_collection
+          (id, account_id, image_type, mime_type, image_data, storage_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(entryId, accountId, imageType, mimeType, storedBlob, relativePath, updatedAt);
+      db.prepare(`
+        INSERT INTO account_profile_images
+          (account_id, image_type, mime_type, image_data, storage_path, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+          image_type = excluded.image_type,
+          mime_type = excluded.mime_type,
+          image_data = excluded.image_data,
+          storage_path = excluded.storage_path,
+          updated_at = excluded.updated_at
+      `).run(accountId, imageType, mimeType, storedBlob, relativePath, updatedAt);
+    });
+    const collectionCountFor = () => Number(db.prepare(
+      'SELECT COUNT(*) AS count FROM account_profile_image_collection WHERE account_id = ?',
+    ).get(accountId)?.count ?? 0);
+
     if (resolvedUploadsDir) {
-      const fileName = `${imageType}.${IMAGE_EXTENSIONS[mimeType]}`;
+      const isoStamp = new Date(updatedAt)
+        .toISOString()
+        .replace(/[-:.]/g, '')
+        .replace('T', '-')
+        .slice(0, 19);
+      const shortId = entryId.replace(/-/g, '').slice(0, 8);
+      const fileName = `${imageType}-${isoStamp}-${shortId}.${IMAGE_EXTENSIONS[mimeType]}`;
       const relativePath = join(accountId, fileName);
       const accountDir = safeUploadPath(accountId);
       const targetPath = safeUploadPath(relativePath);
@@ -1189,60 +1248,83 @@ export function createAccountStore(db, {
       }
 
       try {
-        db.prepare(`
-          INSERT INTO account_profile_images
-            (account_id, image_type, mime_type, image_data, storage_path, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(account_id) DO UPDATE SET
-            image_type = excluded.image_type,
-            mime_type = excluded.mime_type,
-            image_data = excluded.image_data,
-            storage_path = excluded.storage_path,
-            updated_at = excluded.updated_at
-        `).run(accountId, imageType, mimeType, Buffer.alloc(0), relativePath, updatedAt);
+        recordActiveAndCollection(Buffer.alloc(0), relativePath);
       } catch (error) {
         try {
           if (existsSync(targetPath)) unlinkSync(targetPath);
         } catch {}
         throw error;
       }
-      cleanupAccountUploadFiles(accountId, fileName);
       return {
+        id: entryId,
         imageType,
         mimeType,
         storage: 'teledrive',
         storagePath: relativePath,
+        collectionCount: collectionCountFor(),
       };
     }
 
-    db.prepare(`
-      INSERT INTO account_profile_images
-        (account_id, image_type, mime_type, image_data, storage_path, updated_at)
-      VALUES (?, ?, ?, ?, NULL, ?)
-      ON CONFLICT(account_id) DO UPDATE SET
-        image_type = excluded.image_type,
-        mime_type = excluded.mime_type,
-        image_data = excluded.image_data,
-        storage_path = excluded.storage_path,
-        updated_at = excluded.updated_at
-    `).run(accountId, imageType, mimeType, imageData, updatedAt);
+    recordActiveAndCollection(imageData, null);
     return {
+      id: entryId,
       imageType,
       mimeType,
       storage: 'database',
       storagePath: null,
+      collectionCount: collectionCountFor(),
     };
   }
 
-  function getProfileImage(accountId) {
-    const row = db.prepare(`
-      SELECT
-        image_type AS imageType,
-        mime_type AS mimeType,
-        image_data AS imageData,
-        storage_path AS storagePath
+  function listProfileImageCollection(accountId) {
+    const active = db.prepare(`
+      SELECT storage_path AS storagePath, updated_at AS updatedAt
       FROM account_profile_images WHERE account_id = ?
     `).get(accountId);
+    const rows = db.prepare(`
+      SELECT
+        id,
+        image_type AS imageType,
+        mime_type AS mimeType,
+        storage_path AS storagePath,
+        created_at AS createdAt
+      FROM account_profile_image_collection
+      WHERE account_id = ?
+      ORDER BY created_at DESC, rowid DESC
+    `).all(accountId);
+    return rows.map((row) => ({
+      id: row.id,
+      imageType: row.imageType,
+      mimeType: row.mimeType,
+      storagePath: row.storagePath ?? null,
+      createdAt: Number(row.createdAt),
+      isActive: Boolean(
+        active && (row.storagePath
+          ? active.storagePath === row.storagePath
+          : active.updatedAt === row.createdAt),
+      ),
+    }));
+  }
+
+  function getProfileImage(accountId, entryId = null) {
+    const row = entryId
+      ? db.prepare(`
+          SELECT
+            image_type AS imageType,
+            mime_type AS mimeType,
+            image_data AS imageData,
+            storage_path AS storagePath
+          FROM account_profile_image_collection
+          WHERE account_id = ? AND id = ?
+        `).get(accountId, entryId)
+      : db.prepare(`
+          SELECT
+            image_type AS imageType,
+            mime_type AS mimeType,
+            image_data AS imageData,
+            storage_path AS storagePath
+          FROM account_profile_images WHERE account_id = ?
+        `).get(accountId);
     if (!row) return null;
     if (row.storagePath) {
       const fullPath = safeUploadPath(row.storagePath);
@@ -1267,12 +1349,25 @@ export function createAccountStore(db, {
   }
 
   function removeProfileImage(accountId) {
-    const row = db.prepare(
-      'SELECT storage_path AS storagePath FROM account_profile_images WHERE account_id = ?',
-    ).get(accountId);
-    const changes = db.prepare(
-      'DELETE FROM account_profile_images WHERE account_id = ?',
-    ).run(accountId).changes;
+    const row = db.prepare(`
+      SELECT storage_path AS storagePath, updated_at AS updatedAt
+      FROM account_profile_images WHERE account_id = ?
+    `).get(accountId);
+    const changes = withTransaction(() => {
+      const deleted = db.prepare(
+        'DELETE FROM account_profile_images WHERE account_id = ?',
+      ).run(accountId).changes;
+      if (row?.storagePath) {
+        db.prepare(
+          'DELETE FROM account_profile_image_collection WHERE account_id = ? AND storage_path = ?',
+        ).run(accountId, row.storagePath);
+      } else if (row?.updatedAt !== undefined) {
+        db.prepare(
+          'DELETE FROM account_profile_image_collection WHERE account_id = ? AND storage_path IS NULL AND created_at = ?',
+        ).run(accountId, row.updatedAt);
+      }
+      return deleted;
+    });
     if (row?.storagePath) {
       const fullPath = safeUploadPath(row.storagePath);
       if (fullPath && existsSync(fullPath)) {
@@ -1281,7 +1376,7 @@ export function createAccountStore(db, {
         } catch {}
       }
     }
-    cleanupAccountUploadFiles(accountId, null);
+    removeEmptyAccountDir(accountId);
     return changes;
   }
 
@@ -1375,6 +1470,7 @@ export function createAccountStore(db, {
     getStockImage,
     saveProfileImage,
     getProfileImage,
+    listProfileImageCollection,
     removeProfileImage,
     saveNotificationDevice,
     removeNotificationDevice,
