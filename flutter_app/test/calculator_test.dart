@@ -158,7 +158,7 @@ void main() {
       expect(find.text('KES 15.34'), findsNWidgets(2));
 
       // Tap M-Shwari preset
-      await tester.tap(find.text('📱 M-Shwari / Bank (7.5% / 30d)'));
+      await tester.tap(find.text('M-Shwari / Bank (7.5% / 30d)'));
       await tester.pumpAndSettle();
       // 5,000 * 0.075 = 375.00 KES
       expect(find.text('KES 5,375.00'), findsOneWidget);

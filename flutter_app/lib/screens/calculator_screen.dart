@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,11 +5,10 @@ const Color _kBlue = Color(0xFF1E6BFF);
 const Color _kInk = Color(0xFF17162A);
 const Color _kBg = Color(0xFFF8F8FF);
 const Color _kMuted = Color(0xFF777487);
-const Color _kTintMint = Color(0xFFE1F6F4);
-const Color _kGreen = Color(0xFF0F9D85);
-const Color _kTintPeach = Color(0xFFFFF0DC);
-const Color _kOrange = Color(0xFFE65100);
 const Color _kTintPurple = Color(0xFFE8F1FF);
+const Color _kTintMint = Color(0xFFE1F6F4);
+const Color _kTintPeach = Color(0xFFFFF0DC);
+const Color _kTintBlue = Color(0xFFE2EFFB);
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({
@@ -128,7 +126,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '1. Profit Margin & Markup',
+                '1. Profit Margin and Markup',
                 style: TextStyle(fontWeight: FontWeight.bold, color: _kInk),
               ),
               SizedBox(height: 2),
@@ -148,17 +146,17 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               ),
               SizedBox(height: 12),
               Text(
-                '3. Mobile & Hustler Loan Repayment',
+                '3. Mobile and Hustler Loan Repayment',
                 style: TextStyle(fontWeight: FontWeight.bold, color: _kInk),
               ),
               SizedBox(height: 2),
               Text(
-                'Know the true borrowing cost of digital loans (Hustler Fund, Fuliza, M-Shwari, Chama) with daily/monthly repayment schedules.',
+                'Know the true borrowing cost of digital loans (Hustler Fund, Fuliza, M-Shwari, Chama) with daily and monthly repayment schedules.',
                 style: TextStyle(fontSize: 12, color: _kMuted),
               ),
               SizedBox(height: 12),
               Text(
-                '4. Break-Even & Daily Sales Target',
+                '4. Break-Even and Daily Sales Target',
                 style: TextStyle(fontWeight: FontWeight.bold, color: _kInk),
               ),
               SizedBox(height: 2),
@@ -408,7 +406,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               const SizedBox(height: 12),
               _buildInputField(
                 controller: _handlingCtrl,
-                label: 'Packaging, Boda/Transport per unit (KES)',
+                label: 'Packaging, Transport per unit (KES)',
                 prefixText: 'KES ',
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -447,7 +445,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
         const SizedBox(height: 14),
         _buildResultCard(
-          accentColor: _kBlue,
           title: 'Pricing & Profit Summary',
           subtitle: 'Protects business from wholesale inflation',
           children: [
@@ -455,7 +452,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               'Total Unit Cost (Buying + Transport)',
               'KES ${_fmt(totalCost)}',
             ),
-            const Divider(height: 18),
+            const Divider(height: 18, color: Color(0xFFF1F3F9)),
             _buildResultRow(
               'Recommended Selling Price',
               'KES ${_fmt(sellingPrice)}',
@@ -466,9 +463,9 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               'Gross Profit per Item',
               'KES ${_fmt(grossProfit)}',
               isHighlight: grossProfit > 0,
-              highlightColor: grossProfit >= 0 ? _kGreen : Colors.red,
+              highlightColor: _kBlue,
             ),
-            const Divider(height: 18),
+            const Divider(height: 18, color: Color(0xFFF1F3F9)),
             _buildResultRow(
               'Gross Profit Margin',
               '${marginPercent.toStringAsFixed(1)}%',
@@ -479,14 +476,14 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             ),
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: _kTintPurple,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 sellingPrice > 0
-                    ? '💡 For every KES 100 collected, KES ${marginPercent.clamp(0, 100).toStringAsFixed(1)} is gross profit and KES ${(100 - marginPercent).clamp(0, 100).toStringAsFixed(1)} covers your inventory expenses.'
+                    ? 'For every KES 100 collected, KES ${marginPercent.clamp(0, 100).toStringAsFixed(1)} is gross profit and KES ${(100 - marginPercent).clamp(0, 100).toStringAsFixed(1)} covers inventory expenses.'
                     : 'Enter cost values above to see recommendations.',
                 style: const TextStyle(fontSize: 11, color: _kInk),
               ),
@@ -593,7 +590,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
         const SizedBox(height: 14),
         _buildResultCard(
-          accentColor: _kGreen,
           title: 'KRA Tax & eTIMS Breakdown',
           subtitle: taxName,
           children: [
@@ -601,31 +597,31 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               'Net Business Revenue',
               'KES ${_fmt(netAmount)}',
               isHighlight: true,
-              highlightColor: _kGreen,
+              highlightColor: _kBlue,
             ),
             _buildResultRow(
               'Tax Obligation ($taxName)',
               'KES ${_fmt(taxAmount)}',
               isHighlight: true,
-              highlightColor: _kOrange,
+              highlightColor: _kInk,
             ),
-            const Divider(height: 18),
+            const Divider(height: 18, color: Color(0xFFF1F3F9)),
             _buildResultRow(
               'Gross Total Amount',
               'KES ${_fmt(grossAmount)}',
             ),
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _kTintMint,
-                borderRadius: BorderRadius.circular(10),
+                color: _kTintPurple,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                '🇰🇪 $legalNote',
+                legalNote,
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF134E4A),
+                  color: _kInk,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -647,10 +643,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? _kTintMint : Colors.white,
+          color: isSelected ? _kTintPurple : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? _kGreen : const Color(0xFFE2E4EB),
+            color: isSelected ? _kBlue : const Color(0xFFE2E4EB),
             width: isSelected ? 1.5 : 1.0,
           ),
         ),
@@ -660,7 +656,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               isSelected
                   ? Icons.radio_button_checked_rounded
                   : Icons.radio_button_off_rounded,
-              color: isSelected ? _kGreen : _kMuted,
+              color: isSelected ? _kBlue : _kMuted,
               size: 20,
             ),
             const SizedBox(width: 12),
@@ -699,7 +695,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     final term = double.tryParse(_loanTermCtrl.text.trim()) ?? 0.0;
     final fee = double.tryParse(_loanFeeCtrl.text.trim()) ?? 0.0;
 
-    // Convert term to days for uniform interest calculation
     double durationInDays = _termUnit == 'months' ? (term * 30.0) : term;
     if (durationInDays <= 0) durationInDays = 1;
 
@@ -709,7 +704,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     } else if (_rateFrequency == 'monthly') {
       totalInterest = principal * (rate / 100.0) * (durationInDays / 30.0);
     } else {
-      // Annual (e.g. Hustler Fund 8% p.a.)
       totalInterest = principal * (rate / 100.0) * (durationInDays / 365.0);
     }
 
@@ -730,7 +724,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             runSpacing: 8,
             children: [
               _buildLoanPresetChip(
-                label: '🇰🇪 Hustler Fund (8% p.a., 14d)',
+                label: 'Hustler Fund (8% p.a., 14d)',
                 onTap: () => setState(() {
                   _loanRateCtrl.text = '8.0';
                   _rateFrequency = 'annual';
@@ -740,7 +734,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 }),
               ),
               _buildLoanPresetChip(
-                label: '📱 M-Shwari / Bank (7.5% / 30d)',
+                label: 'M-Shwari / Bank (7.5% / 30d)',
                 onTap: () => setState(() {
                   _loanRateCtrl.text = '7.5';
                   _rateFrequency = 'monthly';
@@ -750,7 +744,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 }),
               ),
               _buildLoanPresetChip(
-                label: '⚡ Fuliza / Overdraft (~1% daily)',
+                label: 'Fuliza / Overdraft (~1% daily)',
                 onTap: () => setState(() {
                   _loanRateCtrl.text = '1.0';
                   _rateFrequency = 'daily';
@@ -760,7 +754,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 }),
               ),
               _buildLoanPresetChip(
-                label: '🤝 Chama Loan (10% monthly)',
+                label: 'Chama Loan (10% monthly)',
                 onTap: () => setState(() {
                   _loanRateCtrl.text = '10.0';
                   _rateFrequency = 'monthly';
@@ -884,7 +878,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
         const SizedBox(height: 14),
         _buildResultCard(
-          accentColor: const Color(0xFF7045E5),
           title: 'Repayment & Credit Cost',
           subtitle:
               'For duration of ${durationInDays.toStringAsFixed(0)} days',
@@ -893,15 +886,15 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               'Total Repayment Due',
               'KES ${_fmt(totalRepayment)}',
               isHighlight: true,
-              highlightColor: const Color(0xFF7045E5),
+              highlightColor: _kBlue,
             ),
             _buildResultRow(
               'Total Cost of Credit (Interest + Fees)',
               'KES ${_fmt(totalCostOfCredit)}',
               isHighlight: true,
-              highlightColor: _kOrange,
+              highlightColor: _kInk,
             ),
-            const Divider(height: 18),
+            const Divider(height: 18, color: Color(0xFFF1F3F9)),
             _buildResultRow(
               'Principal Borrowed',
               'KES ${_fmt(principal)}',
@@ -916,16 +909,16 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             ),
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3E8FF),
-                borderRadius: BorderRadius.circular(10),
+                color: _kTintPurple,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                '📊 Real Cost of Credit: ${effectiveCostPercent.toStringAsFixed(1)}% of borrowed amount. ${effectiveCostPercent > 15 ? '⚠️ High borrowing cost: ensure your business margin exceeds this rate.' : '✅ Affordable short-term credit.'}',
+                'Real Cost of Credit: ${effectiveCostPercent.toStringAsFixed(1)}% of borrowed amount. ${effectiveCostPercent > 15 ? 'High borrowing cost: ensure your business margin exceeds this rate.' : 'Affordable short-term credit.'}',
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF581C87),
+                  color: _kInk,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -945,7 +938,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: Color(0xFFDCDFEA)),
+        side: const BorderSide(color: Color(0xFFE2E4EB)),
       ),
       onPressed: onTap,
     );
@@ -1011,7 +1004,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               const SizedBox(height: 10),
               _buildInputField(
                 controller: _licensesCtrl,
-                label: 'County Business Permit & KPLC/Internet',
+                label: 'County Business Permit & Internet',
                 prefixText: 'KES ',
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -1080,7 +1073,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         ),
         const SizedBox(height: 14),
         _buildResultCard(
-          accentColor: _kOrange,
           title: 'Daily Sales Survival & Profit Target',
           subtitle:
               'Total Monthly Overhead: KES ${_fmt(totalFixedOverhead)}',
@@ -1089,18 +1081,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               'Daily Survival Sales (Break-Even)',
               'KES ${_fmt(dailyBreakEvenSales)} / day',
               isHighlight: true,
-              highlightColor: _kOrange,
+              highlightColor: _kBlue,
             ),
             _buildResultRow(
               'Monthly Break-Even Revenue',
               'KES ${_fmt(monthlyBreakEvenSales)}',
             ),
-            const Divider(height: 18),
+            const Divider(height: 18, color: Color(0xFFF1F3F9)),
             _buildResultRow(
               'Target Daily Sales (With Take-Home)',
               'KES ${_fmt(dailySalesWithProfit)} / day',
               isHighlight: true,
-              highlightColor: _kGreen,
+              highlightColor: _kBlue,
             ),
             _buildResultRow(
               'Target Monthly Total Sales',
@@ -1108,16 +1100,16 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             ),
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _kTintPeach,
-                borderRadius: BorderRadius.circular(10),
+                color: _kTintPurple,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                '🎯 Survival Target: Ringing up KES ${_fmt(dailyBreakEvenSales)} every day covers all your shop bills without losing money. Ringing up KES ${_fmt(dailySalesWithProfit)} secures your KES ${_fmt(targetProfit)} monthly income.',
+                'Survival Target: Ringing up KES ${_fmt(dailyBreakEvenSales)} every day covers all your shop bills without losing money. Ringing up KES ${_fmt(dailySalesWithProfit)} secures your KES ${_fmt(targetProfit)} monthly income.',
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF7C2D12),
+                  color: _kInk,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -1222,11 +1214,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       bgColor = _kBlue;
       fgColor = Colors.white;
     } else if (isOperator) {
-      bgColor = const Color(0xFFE8EEF8);
+      bgColor = _kTintPurple;
       fgColor = _kBlue;
     } else if (isAction) {
       bgColor = const Color(0xFFF1F3F9);
-      fgColor = const Color(0xFF5F5D70);
+      fgColor = _kMuted;
     }
 
     return Material(
@@ -1305,7 +1297,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   double? _simpleEval(String expr) {
-    // Basic parser for +, -, *, /
     try {
       List<String> tokens = [];
       String current = '';
@@ -1403,7 +1394,6 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   Widget _buildResultCard({
-    required Color accentColor,
     required String title,
     required String subtitle,
     required List<Widget> children,
@@ -1414,10 +1404,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1.5),
+        border: Border.all(color: _kBlue.withValues(alpha: 0.25), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.08),
+            color: _kBlue.withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -1435,10 +1425,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                   children: [
                     Text(
                       title,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: accentColor,
+                        color: _kBlue,
                       ),
                     ),
                     Text(
@@ -1451,11 +1441,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
+                  color: _kBlue.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.analytics_outlined,
-                    size: 18, color: accentColor),
+                child: const Icon(Icons.analytics_outlined,
+                    size: 18, color: _kBlue),
               ),
             ],
           ),

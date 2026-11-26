@@ -325,20 +325,60 @@ class _UpdateScreenState extends State<UpdateScreen>
                   ],
                   if (_isDownloading) ...[
                     const SizedBox(height: 18),
-                    LinearProgressIndicator(
-                      value: _downloadProgress,
-                      minHeight: 6,
-                      borderRadius: BorderRadius.circular(9),
-                      color: _updateBlue,
-                      backgroundColor: _updateTint,
-                    ),
-                    const SizedBox(height: 7),
-                    Text(
-                      _downloadProgress == null
-                          ? 'Preparing secure download…'
-                          : '${(_downloadProgress! * 100).round()}% downloaded',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: _updateMuted, fontSize: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 18, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: _updateTint,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: _updateBlue.withValues(alpha: 0.2)),
+                      ),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            width: 64,
+                            height: 64,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                CircularProgressIndicator(
+                                  value: _downloadProgress,
+                                  strokeWidth: 5,
+                                  strokeCap: StrokeCap.round,
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                          _updateBlue),
+                                  backgroundColor: Colors.white,
+                                ),
+                                Text(
+                                  _downloadProgress == null
+                                      ? '...'
+                                      : '${(_downloadProgress! * 100).round()}%',
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: _updateInk,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _downloadProgress == null
+                                ? 'Preparing secure download…'
+                                : 'Downloading update (${(_downloadProgress! * 100).round()}% completed)',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _updateInk,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   if (_error != null) ...[

@@ -1,12 +1,11 @@
 {
-  "version_name": "1.1.17",
-  "version_code": 28,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.17/JengaBiz-1.1.17.apk",
-  "sha256": "85a8f42f720546e7029d14aa69610ce71d71b0463671661ed1b19304d9498a9c",
+  "version_name": "1.1.18",
+  "version_code": 29,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.18/JengaBiz-1.1.18.apk",
+  "sha256": "655555e75eb52a74dc5a393ae66a665d5ac208fc337c062eb7c282b9033bfd2a",
   "release_notes": [
-    "Added Smart Business Calculator with 4 core MSME financial functions: Profit Margin & Markup, KRA eTIMS & Tax (16% VAT, 1.5% TOT, 5% WHT), Mobile & Hustler Loan Repayment, and Break-Even Daily Survival Target.",
-    "Added interactive quick arithmetic keypad for fast scratchpad calculations.",
-    "Integrated quick-access calculator buttons in the top app header, main dashboard, and profile tools menu.",
-    "Performance and layout optimizations across all Android screen sizes."
+    "Redesigned the download progress indicator: replaced the thin blue progress line with a circular percentage gauge and status card.",
+    "Streamlined calculator styling to strictly use native JengaBiz brand colors and typography with all emojis removed.",
+    "Integrated Business Calculator with Margin and Markup, KRA eTIMS, Loan Repayment, and Break-Even Sales Target tools."
   ]
 }
