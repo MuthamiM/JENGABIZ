@@ -1,11 +1,11 @@
 {
-  "version_name": "1.1.20",
-  "version_code": 31,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.20/JengaBiz-1.1.20.apk",
-  "sha256": "394feab84b1cbd442c89823f229cf7f7811f3d12c747ce1b01fb5a9e830e73c0",
+  "version_name": "1.1.21",
+  "version_code": 32,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.21/JengaBiz-1.1.21.apk",
+  "sha256": "562d5ad90c6c20f8562c310cb5da889a5f970765cabddfb8545e1e898b3ed6b9",
   "release_notes": [
-    "Ensured recurring update prompts keep the app running smoothly on the latest release until updated.",
-    "Added interactive update status card on the home business overview screen.",
-    "Synced product stock images directly to the dedicated TeleDrive account folder on disk."
+    "Enhanced stock images with instant offline local storage loading and TeleDrive synchronization.",
+    "Cleaned up sign-in screen and legal document links.",
+    "Performance improvements for inventory management."
   ]
 }
