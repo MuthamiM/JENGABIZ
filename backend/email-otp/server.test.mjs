@@ -868,6 +868,7 @@ test('profile photo uploads update active photo and preserve per-user collection
   }
 });
 
+
 test('security camera captures save to account folder in TeleDrive and list captures', async () => {
   const teledriveDir = mkdtempSync(join(tmpdir(), 'jengabiz-teledrive-sec-'));
   const validJpeg = (tag) => Buffer.concat([
@@ -940,3 +941,112 @@ test('security camera captures save to account folder in TeleDrive and list capt
     rmSync(teledriveDir, { recursive: true, force: true });
   }
 });
+
+test('stock images sync to TeleDrive stocks folder and clean up when items removed', async () => {
+  const teledriveDir = mkdtempSync(join(tmpdir(), 'jengabiz-teledrive-stocks-'));
+  const samplePng = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+  ]);
+
+  try {
+    await withService({
+      apiKey: 'test-key',
+      fromEmail: 'verify@example.com',
+      hashSecret: 'test-hash-secret',
+      profileUploadsDir: teledriveDir,
+      makeOtp: () => '112233',
+      sendEmail: async () => {},
+    }, async (baseUrl) => {
+      await post(baseUrl, '/email-auth/request-otp', { email: 'stocksync@example.com' });
+      const verification = await post(baseUrl, '/email-auth/verify-otp', {
+        email: 'stocksync@example.com',
+        otp: '112233',
+      });
+      const registered = await post(baseUrl, '/email-auth/register', {
+        email: 'stocksync@example.com',
+        verificationToken: verification.body.verificationToken,
+        name: 'TeleDrive Sync Shop',
+        shopName: 'TeleDrive Shop',
+        phone: '',
+        password: 'password123',
+        items: [{
+          id: 'item-laptop',
+          name: 'HP EliteBook',
+          category: 'Computers',
+          price: 45000,
+          costPrice: 38000,
+          stockRemaining: 5,
+          unitsSold: 2,
+          sku: 'HP-EB-840',
+          imageUrl: '',
+          reorderLevel: 2,
+        }],
+      });
+      assert.equal(registered.status, 201);
+      const token = registered.body.sessionToken;
+      const accountId = registered.body.user.id;
+
+      // Upload stock image
+      const upload = await request(baseUrl, '/email-auth/stock/images/item-laptop', {
+        method: 'PUT',
+        token,
+        payload: {
+          mimeType: 'image/png',
+          imageBase64: samplePng.toString('base64'),
+        },
+      });
+      assert.equal(upload.status, 200);
+      assert.equal(upload.body.imageUrl, 'stock-image:item-laptop');
+
+      // Check TeleDrive stocks folder on disk
+      const userStocksDir = join(teledriveDir, accountId, 'stocks');
+      assert.ok(existsSync(userStocksDir), 'stocks directory should exist');
+      const files = readdirSync(userStocksDir);
+      assert.equal(files.length, 1);
+      assert.ok(files[0].startsWith('hp-elitebook-item-laptop'));
+      assert.ok(files[0].endsWith('.png'));
+
+      const diskFilePath = join(userStocksDir, files[0]);
+      assert.deepEqual(readFileSync(diskFilePath), samplePng);
+
+      // Verify deletion from disk and re-creation from DB blob on fetch
+      unlinkSync(diskFilePath);
+      assert.ok(!existsSync(diskFilePath));
+
+      const fetchedImage = await fetch(`${baseUrl}/email-auth/stock/images/item-laptop`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(fetchedImage.status, 200);
+      assert.deepEqual(Buffer.from(await fetchedImage.arrayBuffer()), samplePng);
+      assert.ok(existsSync(diskFilePath), 'disk file should be recreated on demand');
+
+      // Update stock items removing the image reference cleans up disk file
+      const updateItems = await request(baseUrl, '/email-auth/stock/items', {
+        method: 'PUT',
+        token,
+        payload: {
+          items: [{
+            id: 'item-laptop',
+            name: 'HP EliteBook',
+            category: 'Computers',
+            price: 45000,
+            costPrice: 38000,
+            stockRemaining: 5,
+            unitsSold: 2,
+            sku: 'HP-EB-840',
+            imageUrl: '',
+            reorderLevel: 2,
+          }],
+        },
+      });
+      assert.equal(updateItems.status, 200);
+      assert.ok(!existsSync(diskFilePath), 'disk file should be unlinked when image reference is removed');
+    });
+  } finally {
+    rmSync(teledriveDir, { recursive: true, force: true });
+  }
+});
+

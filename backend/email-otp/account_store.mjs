@@ -119,6 +119,7 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
       item_id TEXT NOT NULL,
       mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
       image_data BLOB NOT NULL,
+      storage_path TEXT,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (account_id, item_id)
     );
@@ -213,6 +214,13 @@ export function initializeAccountStore(db, { encryptPhone, hashPhone }) {
   }
   if (!deviceColumns.has('last_update_push_version')) {
     db.exec('ALTER TABLE notification_devices ADD COLUMN last_update_push_version INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const stockImageColumns = new Set(
+    db.prepare('PRAGMA table_info(stock_images)').all().map((column) => column.name),
+  );
+  if (!stockImageColumns.has('storage_path')) {
+    db.exec('ALTER TABLE stock_images ADD COLUMN storage_path TEXT');
   }
 
   const profileImageColumns = new Set(
@@ -415,6 +423,21 @@ export function createAccountStore(db, {
     if (!SAFE_ACCOUNT_ID.test(accountId)) return;
     const accountDir = safeUploadPath(accountId);
     if (!accountDir || !existsSync(accountDir)) return;
+    const stocksDir = join(accountDir, 'stocks');
+    if (existsSync(stocksDir)) {
+      for (const entry of readdirSync(stocksDir, { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.startsWith('.tmp-')) {
+          try {
+            unlinkSync(join(stocksDir, entry.name));
+          } catch {}
+        }
+      }
+      try {
+        if (readdirSync(stocksDir).length === 0) {
+          rmdirSync(stocksDir);
+        }
+      } catch {}
+    }
     const entries = readdirSync(accountDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isFile() && entry.name.startsWith('.tmp-')) {
@@ -1146,13 +1169,19 @@ export function createAccountStore(db, {
         .filter((item) => item.imageUrl === `stock-image:${item.id}`)
         .map((item) => item.id));
       const storedImages = db.prepare(
-        'SELECT item_id FROM stock_images WHERE account_id = ?',
+        'SELECT item_id, storage_path AS storagePath FROM stock_images WHERE account_id = ?',
       ).all(accountId);
       const removeImage = db.prepare(
         'DELETE FROM stock_images WHERE account_id = ? AND item_id = ?',
       );
       for (const image of storedImages) {
         if (!itemsWithStoredImages.has(image.item_id)) {
+          if (image.storagePath) {
+            const diskPath = safeUploadPath(image.storagePath);
+            if (diskPath && existsSync(diskPath)) {
+              try { unlinkSync(diskPath); } catch {}
+            }
+          }
           removeImage.run(accountId, image.item_id);
         }
       }
@@ -1161,8 +1190,15 @@ export function createAccountStore(db, {
   }
 
   function saveStockImage(accountId, itemId, mimeType, imageData, updatedAt = now()) {
+    if (!SAFE_ACCOUNT_ID.test(accountId) ||
+        !Object.hasOwn(IMAGE_EXTENSIONS, mimeType) ||
+        !Buffer.isBuffer(imageData) ||
+        imageData.length === 0 ||
+        imageData.length > MAX_PROFILE_IMAGE_BYTES) {
+      return false;
+    }
     const item = db.prepare(
-      'SELECT 1 AS found FROM stock_items WHERE account_id = ? AND id = ?',
+      'SELECT name FROM stock_items WHERE account_id = ? AND id = ?',
     ).get(accountId, itemId);
     if (!item) return false;
     const used = db.prepare(`
@@ -1170,22 +1206,139 @@ export function createAccountStore(db, {
       FROM stock_images WHERE account_id = ? AND item_id <> ?
     `).get(accountId, itemId).bytes;
     if (used + imageData.length > MAX_STOCK_IMAGE_STORAGE_BYTES) return 'quota';
+
+    let relativePath = null;
+    if (resolvedUploadsDir) {
+      const safeId = itemId.replace(/[^A-Za-z0-9_-]/g, '_');
+      const safeName = item.name
+        ? item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30)
+        : '';
+      const ext = IMAGE_EXTENSIONS[mimeType];
+      const fileName = safeName ? `${safeName}-${safeId}.${ext}` : `stock-${safeId}.${ext}`;
+      relativePath = join(accountId, 'stocks', fileName);
+      const targetPath = safeUploadPath(relativePath);
+      const stocksDir = safeUploadPath(join(accountId, 'stocks'));
+
+      if (targetPath && stocksDir) {
+        mkdirSync(resolvedUploadsDir, { recursive: true, mode: 0o755 });
+        applyPermissions(resolvedUploadsDir, 0o755);
+        mkdirSync(stocksDir, { recursive: true, mode: 0o755 });
+        applyPermissions(stocksDir, 0o755);
+
+        const existingRow = db.prepare(
+          'SELECT storage_path FROM stock_images WHERE account_id = ? AND item_id = ?',
+        ).get(accountId, itemId);
+        if (existingRow?.storage_path && existingRow.storage_path !== relativePath) {
+          const oldPath = safeUploadPath(existingRow.storage_path);
+          if (oldPath && existsSync(oldPath)) {
+            try { unlinkSync(oldPath); } catch {}
+          }
+        }
+
+        const tempPath = join(stocksDir, `.tmp-${randomUUID()}`);
+        try {
+          writeFileSync(tempPath, imageData);
+          applyPermissions(tempPath, 0o644);
+          renameSync(tempPath, targetPath);
+          applyPermissions(targetPath, 0o644);
+        } catch (error) {
+          try {
+            if (existsSync(tempPath)) unlinkSync(tempPath);
+          } catch {}
+          throw error;
+        }
+      }
+    }
+
     db.prepare(`
-      INSERT INTO stock_images (account_id, item_id, mime_type, image_data, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO stock_images (account_id, item_id, mime_type, image_data, storage_path, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(account_id, item_id) DO UPDATE SET
         mime_type = excluded.mime_type,
         image_data = excluded.image_data,
+        storage_path = excluded.storage_path,
         updated_at = excluded.updated_at
-    `).run(accountId, itemId, mimeType, imageData, updatedAt);
+    `).run(accountId, itemId, mimeType, imageData, relativePath, updatedAt);
     return true;
   }
 
   function getStockImage(accountId, itemId) {
-    return db.prepare(`
-      SELECT mime_type AS mimeType, image_data AS imageData
+    const row = db.prepare(`
+      SELECT mime_type AS mimeType, image_data AS imageData, storage_path AS storagePath
       FROM stock_images WHERE account_id = ? AND item_id = ?
-    `).get(accountId, itemId) ?? null;
+    `).get(accountId, itemId);
+    if (!row) return null;
+
+    if (resolvedUploadsDir && row.imageData && row.imageData.length > 0) {
+      let targetPath = row.storagePath ? safeUploadPath(row.storagePath) : null;
+      if (!targetPath) {
+        const item = db.prepare('SELECT name FROM stock_items WHERE account_id = ? AND id = ?').get(accountId, itemId);
+        const safeId = itemId.replace(/[^A-Za-z0-9_-]/g, '_');
+        const safeName = item?.name
+          ? item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30)
+          : '';
+        const ext = IMAGE_EXTENSIONS[row.mimeType] || 'jpg';
+        const fileName = safeName ? `${safeName}-${safeId}.${ext}` : `stock-${safeId}.${ext}`;
+        const relPath = join(accountId, 'stocks', fileName);
+        targetPath = safeUploadPath(relPath);
+        if (targetPath) {
+          db.prepare('UPDATE stock_images SET storage_path = ? WHERE account_id = ? AND item_id = ?')
+            .run(relPath, accountId, itemId);
+          row.storagePath = relPath;
+        }
+      }
+      if (targetPath && !existsSync(targetPath)) {
+        try {
+          const dir = dirname(targetPath);
+          mkdirSync(dir, { recursive: true, mode: 0o755 });
+          applyPermissions(dir, 0o755);
+          writeFileSync(targetPath, row.imageData);
+          applyPermissions(targetPath, 0o644);
+        } catch {}
+      }
+    }
+
+    return {
+      mimeType: row.mimeType,
+      imageData: row.imageData,
+    };
+  }
+
+  function syncStockImagesToTeleDrive() {
+    if (!resolvedUploadsDir) return;
+    try {
+      const rows = db.prepare(`
+        SELECT si.account_id, si.item_id, si.mime_type, si.image_data, si.storage_path, it.name
+        FROM stock_images si
+        LEFT JOIN stock_items it ON it.account_id = si.account_id AND it.id = si.item_id
+      `).all();
+      for (const row of rows) {
+        if (!row.image_data || row.image_data.length === 0) continue;
+        const safeId = row.item_id.replace(/[^A-Za-z0-9_-]/g, '_');
+        const safeName = row.name
+          ? row.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30)
+          : '';
+        const ext = IMAGE_EXTENSIONS[row.mime_type] || 'jpg';
+        const fileName = safeName ? `${safeName}-${safeId}.${ext}` : `stock-${safeId}.${ext}`;
+        const relativePath = join(row.account_id, 'stocks', fileName);
+        const targetPath = safeUploadPath(relativePath);
+        if (targetPath) {
+          const stocksDir = dirname(targetPath);
+          mkdirSync(resolvedUploadsDir, { recursive: true, mode: 0o755 });
+          applyPermissions(resolvedUploadsDir, 0o755);
+          mkdirSync(stocksDir, { recursive: true, mode: 0o755 });
+          applyPermissions(stocksDir, 0o755);
+          if (!existsSync(targetPath)) {
+            writeFileSync(targetPath, row.image_data);
+            applyPermissions(targetPath, 0o644);
+          }
+          if (row.storage_path !== relativePath) {
+            db.prepare('UPDATE stock_images SET storage_path = ? WHERE account_id = ? AND item_id = ?')
+              .run(relativePath, row.account_id, row.item_id);
+          }
+        }
+      }
+    } catch {}
   }
 
   function saveProfileImage(
@@ -1615,6 +1768,8 @@ export function createAccountStore(db, {
   function revokeSession(tokenHash) {
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
   }
+
+  syncStockImagesToTeleDrive();
 
   return {
     register,
