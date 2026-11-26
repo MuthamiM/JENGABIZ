@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart'
@@ -261,6 +262,7 @@ class JengaDB {
     }
 
     unawaited(_refreshStockWidget());
+    prefetchStockImages();
     await NotificationCenterService.instance
         .setAccountScope(currentUser?.email ?? currentUser?.id);
     inventoryRevision.value++;
@@ -475,6 +477,7 @@ class JengaDB {
     await prefs.setString('current_user_id', user.id);
     hasUnsyncedStock.value = prefs.getBool(_stockSyncKey(user.id)) ?? false;
     await _persistItemsLocally();
+    prefetchStockImages();
     await NotificationCenterService.instance.setAccountScope(user.email);
     unawaited(ProfileImageCacheService.instance
         .read(user.id)
@@ -644,6 +647,7 @@ class JengaDB {
     items = remoteItems.map(StockItem.fromJson).toList();
     inventoryOwnerId = currentUser?.id;
     await _persistItemsLocally();
+    prefetchStockImages();
     await prefs.setBool(syncKey, false);
     hasUnsyncedStock.value = false;
     inventoryRevision.value++;
@@ -653,6 +657,66 @@ class JengaDB {
   String _stockSyncKey(String userId) {
     final safeId = userId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
     return 'jengabiz_stock_sync_pending_$safeId';
+  }
+
+  bool _prefetchingStockImages = false;
+
+  void prefetchStockImages() {
+    if (_prefetchingStockImages) return;
+    final owner = currentUser?.id ?? inventoryOwnerId ?? '';
+    final api = JengaApiService.instance;
+    final snapshot = List<StockItem>.from(items);
+    if (snapshot.isEmpty) return;
+    _prefetchingStockImages = true;
+
+    unawaited(() async {
+      try {
+        const concurrency = 3;
+        var nextIndex = 0;
+        Future<void> worker() async {
+          while (nextIndex < snapshot.length) {
+            final item = snapshot[nextIndex++];
+            final cacheKey =
+                StockImageCacheService.itemKeyForUrl(item.imageUrl);
+            if (cacheKey == null) continue;
+            if (StockImageCacheService.instance.peekMemory(owner, cacheKey) !=
+                null) {
+              continue;
+            }
+            if (item.imageUrl.startsWith('stock-image:') &&
+                api.authToken == null) {
+              // Offline-only local storage check when no session token exists.
+              await StockImageCacheService.instance
+                  .getImage(owner, cacheKey)
+                  .catchError((_) => null);
+              continue;
+            }
+            await StockImageCacheService.instance
+                .ensureCached(
+                  ownerId: owner,
+                  itemId: cacheKey,
+                  fetcher: () {
+                    if (item.imageUrl.startsWith('stock-image:')) {
+                      return api.fetchStockImage(cacheKey);
+                    }
+                    final uri = Uri.tryParse(item.imageUrl);
+                    if (uri == null || !uri.hasAuthority) {
+                      return Future<Uint8List?>.value(null);
+                    }
+                    return api.fetchRemoteImage(uri);
+                  },
+                )
+                .catchError((_) => null);
+          }
+        }
+
+        await Future.wait(
+          List.generate(concurrency, (_) => worker()),
+        );
+      } finally {
+        _prefetchingStockImages = false;
+      }
+    }());
   }
 
   Future<void> _refreshStockWidget() async {
@@ -790,6 +854,7 @@ class JengaDB {
     );
     await prefs.setString('current_user_id', user.id);
     await _persistItemsLocally();
+    prefetchStockImages();
     await NotificationCenterService.instance.setAccountScope(user.email);
     unawaited(ProfileImageCacheService.instance
         .ensureSynced(user.id.trim().toLowerCase(), forceRemote: true)

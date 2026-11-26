@@ -681,7 +681,7 @@ export function createEmailOtpHandler({
             response.writeHead(200, {
               'content-type': storedImage.mimeType,
               'content-length': imageData.length,
-              'cache-control': 'private, no-store',
+              'cache-control': 'private, max-age=86400',
               'x-content-type-options': 'nosniff',
             });
             response.end(imageData);

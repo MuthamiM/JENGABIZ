@@ -1150,10 +1150,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   alignment: WrapAlignment.center,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text(
-                      'Read:',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF777487)),
-                    ),
                     TextButton(
                       onPressed: _showTerms,
                       style: TextButton.styleFrom(
@@ -1180,12 +1176,6 @@ class _AuthScreenState extends State<AuthScreen> {
                           style: TextStyle(fontSize: 11)),
                     ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Your account and stock sync securely and stay cached offline.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10, color: Color(0xFF8E8B9E)),
                 ),
               ],
             ],

@@ -1263,31 +1263,41 @@ export function createAccountStore(db, {
   }
 
   function getStockImage(accountId, itemId) {
-    const row = db.prepare(`
-      SELECT mime_type AS mimeType, image_data AS imageData, storage_path AS storagePath
-      FROM stock_images WHERE account_id = ? AND item_id = ?
-    `).get(accountId, itemId);
+    let row = null;
+    if (accountId) {
+      row = db.prepare(`
+        SELECT account_id AS accountId, mime_type AS mimeType, image_data AS imageData, storage_path AS storagePath
+        FROM stock_images WHERE account_id = ? AND item_id = ?
+      `).get(accountId, itemId);
+    }
+    if (!row && (!accountId || itemId.startsWith('sample_'))) {
+      row = db.prepare(`
+        SELECT account_id AS accountId, mime_type AS mimeType, image_data AS imageData, storage_path AS storagePath
+        FROM stock_images WHERE item_id = ?
+      `).get(itemId);
+    }
     if (!row) return null;
 
-    if (resolvedUploadsDir && row.imageData && row.imageData.length > 0) {
-      let targetPath = row.storagePath ? safeUploadPath(row.storagePath) : null;
-      if (!targetPath) {
-        const item = db.prepare('SELECT name FROM stock_items WHERE account_id = ? AND id = ?').get(accountId, itemId);
+    const currentAccountId = row.accountId || accountId;
+    let targetPath = row.storagePath ? safeUploadPath(row.storagePath) : null;
+    if (resolvedUploadsDir) {
+      if (!targetPath && currentAccountId) {
+        const item = db.prepare('SELECT name FROM stock_items WHERE account_id = ? AND id = ?').get(currentAccountId, itemId);
         const safeId = itemId.replace(/[^A-Za-z0-9_-]/g, '_');
         const safeName = item?.name
           ? item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30)
           : '';
         const ext = IMAGE_EXTENSIONS[row.mimeType] || 'jpg';
         const fileName = safeName ? `${safeName}-${safeId}.${ext}` : `stock-${safeId}.${ext}`;
-        const relPath = join(accountId, 'stocks', fileName);
+        const relPath = join(currentAccountId, 'stocks', fileName);
         targetPath = safeUploadPath(relPath);
         if (targetPath) {
           db.prepare('UPDATE stock_images SET storage_path = ? WHERE account_id = ? AND item_id = ?')
-            .run(relPath, accountId, itemId);
+            .run(relPath, currentAccountId, itemId);
           row.storagePath = relPath;
         }
       }
-      if (targetPath && !existsSync(targetPath)) {
+      if (targetPath && !existsSync(targetPath) && row.imageData && row.imageData.length > 0) {
         try {
           const dir = dirname(targetPath);
           mkdirSync(dir, { recursive: true, mode: 0o755 });
@@ -1298,9 +1308,21 @@ export function createAccountStore(db, {
       }
     }
 
+    let finalData = row.imageData;
+    if (targetPath && existsSync(targetPath)) {
+      try {
+        const diskData = readFileSync(targetPath);
+        if (diskData && diskData.length > 0) {
+          finalData = diskData;
+        }
+      } catch {}
+    }
+
+    if (!finalData || finalData.length === 0) return null;
+
     return {
       mimeType: row.mimeType,
-      imageData: row.imageData,
+      imageData: finalData,
     };
   }
 

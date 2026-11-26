@@ -60,9 +60,11 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Future<void> _syncInventoryOnOpen() async {
+    JengaDB.instance.prefetchStockImages();
     try {
       final synced = await JengaDB.instance.syncStockWithServer();
       if (mounted && synced) {
+        JengaDB.instance.prefetchStockImages();
         if (widget.focusItemId != null && _searchCtrl.text.isEmpty) {
           _applyInitialFocus();
         }

@@ -160,7 +160,13 @@ void main() {
 
     expect(find.text('Email Address'), findsOneWidget);
     expect(find.text('Password'), findsOneWidget);
-    expect(find.text('Read:'), findsOneWidget);
+    expect(find.text('Terms of Use'), findsOneWidget);
+    expect(find.text('Privacy Policy'), findsOneWidget);
+    expect(find.text('Read:'), findsNothing);
+    expect(
+      find.text('Your account and stock sync securely and stay cached offline.'),
+      findsNothing,
+    );
     expect(find.text('Touch Sensor'), findsNothing);
     expect(find.textContaining('Musa'), findsNothing);
 

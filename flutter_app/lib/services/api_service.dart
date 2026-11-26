@@ -76,6 +76,7 @@ class JengaApiService {
   String? shopId;
   final ValueNotifier<bool> isOnline = ValueNotifier<bool>(true);
   final Map<String, Future<Uint8List?>> _inflightStockImages = {};
+  final Map<String, Future<Uint8List?>> _inflightRemoteImages = {};
   static const _sessionBundleKey = 'jengabiz_session_bundle';
 
   void _markOnline() {
@@ -491,6 +492,65 @@ class JengaApiService {
       final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
         if (all.length + chunk.length > 1024 * 1024) {
           throw const FormatException('Stock image is larger than 1 MB.');
+        }
+        all.addAll(chunk);
+        return all;
+      }).timeout(timeout);
+      return bytes.isEmpty ? null : Uint8List.fromList(bytes);
+    } on SocketException {
+      _markOffline();
+      return null;
+    } on TimeoutException {
+      _markOffline();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> fetchRemoteImage(Uri uri) {
+    final client = _client;
+    if (client == null || !{'http', 'https'}.contains(uri.scheme)) {
+      return Future<Uint8List?>.value(null);
+    }
+    final key = uri.toString();
+    final existing = _inflightRemoteImages[key];
+    if (existing != null) return existing;
+
+    final requestFuture = _fetchRemoteImageInternal(client, uri).whenComplete(
+      () => _inflightRemoteImages.remove(key),
+    );
+    _inflightRemoteImages[key] = requestFuture;
+    return requestFuture;
+  }
+
+  Future<Uint8List?> _fetchRemoteImageInternal(
+    HttpClient client,
+    Uri uri,
+  ) async {
+    const timeout = Duration(seconds: 8);
+    const maxBytes = 2 * 1024 * 1024;
+    try {
+      final request = await client.getUrl(uri).timeout(timeout);
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'image/jpeg, image/png, image/webp, image/*',
+      );
+      final response = await request.close().timeout(timeout);
+      _markOnline();
+      if (response.statusCode != HttpStatus.ok ||
+          response.contentLength > maxBytes) {
+        await response.drain<void>();
+        return null;
+      }
+      final contentType = response.headers.contentType?.mimeType ?? '';
+      if (contentType.isNotEmpty && !contentType.startsWith('image/')) {
+        await response.drain<void>();
+        return null;
+      }
+      final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
+        if (all.length + chunk.length > maxBytes) {
+          throw const FormatException('Remote stock image is too large.');
         }
         all.addAll(chunk);
         return all;

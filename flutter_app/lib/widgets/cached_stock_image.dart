@@ -27,8 +27,8 @@ class CachedStockImage extends StatefulWidget {
 }
 
 class _CachedStockImageState extends State<CachedStockImage> {
-  static final Map<String, DateTime> _recentFailureById = {};
-  static const Duration _retryCooldown = Duration(seconds: 45);
+  static final Map<String, DateTime> _recentFailureByKey = {};
+  static const Duration _retryCooldown = Duration(seconds: 20);
 
   File? _cachedFile;
   Uint8List? _memoryBytes;
@@ -40,7 +40,8 @@ class _CachedStockImageState extends State<CachedStockImage> {
     super.initState();
     _primeMemory();
     JengaApiService.instance.isOnline.addListener(_onConnectivityChanged);
-    _loadRemoteImage();
+    StockImageCacheService.instance.revision.addListener(_onCacheUpdated);
+    _loadLocalOrRemoteImage();
   }
 
   @override
@@ -52,13 +53,14 @@ class _CachedStockImageState extends State<CachedStockImage> {
       _memoryBytes = null;
       _finishedInitialLoad = false;
       _primeMemory();
-      _loadRemoteImage();
+      _loadLocalOrRemoteImage();
     }
   }
 
   @override
   void dispose() {
     JengaApiService.instance.isOnline.removeListener(_onConnectivityChanged);
+    StockImageCacheService.instance.revision.removeListener(_onCacheUpdated);
     super.dispose();
   }
 
@@ -66,73 +68,150 @@ class _CachedStockImageState extends State<CachedStockImage> {
     if (JengaApiService.instance.isOnline.value &&
         _cachedFile == null &&
         _memoryBytes == null) {
-      _recentFailureById.clear();
-      _loadRemoteImage();
+      _recentFailureByKey.clear();
+      _loadLocalOrRemoteImage();
     }
   }
 
-  void _primeMemory() {
-    final ownerId = widget.ownerId;
-    final itemId = _itemId;
-    if (ownerId == null || itemId == null) return;
-    _memoryBytes = StockImageCacheService.instance.peekMemory(ownerId, itemId);
+  void _onCacheUpdated() {
+    if (!mounted || _memoryBytes != null || _cachedFile != null) return;
+    final key = _cacheItemKey;
+    if (key == null) return;
+    final ownerId = widget.ownerId ?? '';
+    final mem = StockImageCacheService.instance.peekMemory(ownerId, key);
+    if (mem != null) {
+      setState(() {
+        _memoryBytes = mem;
+        _finishedInitialLoad = true;
+      });
+      return;
+    }
+    _loadLocalOrRemoteImage();
   }
 
-  String? get _itemId {
+  void _primeMemory() {
+    final key = _cacheItemKey;
+    if (key == null) return;
+    final ownerId = widget.ownerId ?? '';
+    _memoryBytes = StockImageCacheService.instance.peekMemory(ownerId, key);
+    if (_memoryBytes != null) {
+      _finishedInitialLoad = true;
+    }
+  }
+
+  String? get _stockImageId {
     const prefix = 'stock-image:';
     if (!widget.imageUrl.startsWith(prefix)) return null;
     final id = widget.imageUrl.substring(prefix.length);
     return RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id) ? id : null;
   }
 
-  Future<void> _loadRemoteImage() async {
-    final ownerId = widget.ownerId;
-    final itemId = _itemId;
-    if (ownerId == null || itemId == null) return;
+  Uri? get _remoteUri {
+    final url = widget.imageUrl;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasAuthority) return null;
+    return uri;
+  }
+
+  String? get _cacheItemKey =>
+      StockImageCacheService.itemKeyForUrl(widget.imageUrl);
+
+  Future<void> _loadLocalOrRemoteImage() async {
+    final cacheKey = _cacheItemKey;
+    if (cacheKey == null) {
+      if (mounted) setState(() => _finishedInitialLoad = true);
+      return;
+    }
+    final ownerId = widget.ownerId ?? '';
+    final stockId = _stockImageId;
+    final remoteUri = _remoteUri;
     final generation = ++_loadGeneration;
+
     try {
       final service = StockImageCacheService.instance;
-      final file = await service.getImage(ownerId, itemId);
+
+      // 1. Check local storage first (instant offline & online display).
+      final localFile = await service.getImage(ownerId, cacheKey);
       if (!mounted || generation != _loadGeneration) return;
-      if (file != null) {
+
+      if (localFile != null) {
+        final mem = service.peekMemory(ownerId, cacheKey);
         setState(() {
-          _cachedFile = file;
-          _memoryBytes = service.peekMemory(ownerId, itemId) ?? _memoryBytes;
+          _cachedFile = localFile;
+          if (mem != null) _memoryBytes = mem;
+          _finishedInitialLoad = true;
         });
+
+        // If offline or cache was refreshed within the last 6 hours, keep local.
+        if (!JengaApiService.instance.isOnline.value) return;
+        try {
+          final modTime = await localFile.lastModified();
+          if (DateTime.now().difference(modTime) < const Duration(hours: 6)) {
+            return;
+          }
+        } catch (_) {
+          return;
+        }
       }
 
-      final isFresh = file != null &&
-          DateTime.now().difference(await file.lastModified()) <
-              const Duration(hours: 6);
-      if (isFresh) return;
+      // If no authenticated session for stock-image: TeleDrive API, stop at local cache.
+      if (stockId != null && JengaApiService.instance.authToken == null) {
+        if (mounted && generation == _loadGeneration) {
+          setState(() => _finishedInitialLoad = true);
+        }
+        return;
+      }
 
-      final failedAt = _recentFailureById[itemId];
+      // Never trap offline views in shimmer: finish initial load before network probing.
+      if (!JengaApiService.instance.isOnline.value &&
+          mounted &&
+          generation == _loadGeneration) {
+        setState(() => _finishedInitialLoad = true);
+      }
+
+      final failedAt = _recentFailureByKey[cacheKey];
       if (failedAt != null &&
           DateTime.now().difference(failedAt) < _retryCooldown) {
+        if (mounted && generation == _loadGeneration) {
+          setState(() => _finishedInitialLoad = true);
+        }
         return;
       }
 
-      final bytes = await JengaApiService.instance.fetchStockImage(itemId);
+      // 2. Fetch from TeleDrive backend or remote URL when online / recovering.
+      final bytes = stockId != null
+          ? await JengaApiService.instance.fetchStockImage(stockId)
+          : remoteUri != null
+              ? await JengaApiService.instance.fetchRemoteImage(remoteUri)
+              : null;
+      if (!mounted || generation != _loadGeneration) return;
+
       if (bytes == null || bytes.isEmpty) {
-        _recentFailureById[itemId] = DateTime.now();
+        _recentFailureByKey[cacheKey] = DateTime.now();
+        if (mounted && generation == _loadGeneration) {
+          setState(() => _finishedInitialLoad = true);
+        }
         return;
       }
-      _recentFailureById.remove(itemId);
-      if (!mounted || generation != _loadGeneration) {
-        await service.saveImage(ownerId, itemId, bytes);
-        return;
-      }
-      final saved = await service.saveImage(ownerId, itemId, bytes);
-      if (mounted && generation == _loadGeneration) {
-        setState(() {
-          _cachedFile = saved;
-          _memoryBytes = service.peekMemory(ownerId, itemId) ?? bytes;
-        });
+
+      _recentFailureByKey.remove(cacheKey);
+      setState(() {
+        _memoryBytes = bytes;
+        _finishedInitialLoad = true;
+      });
+      try {
+        final savedFile = await service.saveImage(ownerId, cacheKey, bytes);
+        if (mounted && generation == _loadGeneration) {
+          setState(() => _cachedFile = savedFile);
+        }
+      } catch (_) {
+        // Memory bytes are already displayed even if disk persistence failed.
       }
     } catch (_) {
-      // Keep an existing cached photo available when the shop is offline.
+      // Keep local image or cleanly display placeholder.
     } finally {
-      if (mounted && generation == _loadGeneration) {
+      if (mounted && generation == _loadGeneration && !_finishedInitialLoad) {
         setState(() => _finishedInitialLoad = true);
       }
     }
@@ -167,8 +246,7 @@ class _CachedStockImageState extends State<CachedStockImage> {
         return placeholder();
       }
     }
-    if (url.startsWith('stock-image:')) {
-      if (widget.ownerId == null) return placeholder();
+    if (_cacheItemKey != null) {
       final memBytes = _memoryBytes;
       if (memBytes != null) {
         return Image.memory(
@@ -191,6 +269,7 @@ class _CachedStockImageState extends State<CachedStockImage> {
           cacheWidth: (widget.width * 2).round(),
           cacheHeight: (widget.height * 2).round(),
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => placeholder(),
         );
       }
@@ -199,24 +278,6 @@ class _CachedStockImageState extends State<CachedStockImage> {
         width: widget.width,
         height: widget.height,
         borderRadius: 12,
-      );
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return Image.network(
-        url,
-        width: widget.width,
-        height: widget.height,
-        cacheWidth: (widget.width * 2).round(),
-        cacheHeight: (widget.height * 2).round(),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder(),
-        loadingBuilder: (_, child, progress) => progress == null
-            ? child
-            : ShimmerBox(
-                width: widget.width,
-                height: widget.height,
-                borderRadius: 12,
-              ),
       );
     }
     return placeholder();

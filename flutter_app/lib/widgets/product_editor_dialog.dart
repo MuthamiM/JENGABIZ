@@ -191,19 +191,15 @@ class _ProductEditorDialogState extends State<ProductEditorDialog> {
           return placeholder;
         }
       }
-    } else if (url.startsWith('stock-image:')) {
+    } else if (url.startsWith('stock-image:') ||
+        url.startsWith('https://') ||
+        url.startsWith('http://')) {
       return CachedStockImage(
         imageUrl: url,
         ownerId: JengaDB.instance.currentUser?.id ??
             JengaDB.instance.inventoryOwnerId,
         width: 64,
         height: 64,
-      );
-    } else if (url.startsWith('https://') || url.startsWith('http://')) {
-      return Image.network(
-        url,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
       );
     }
     return placeholder;
