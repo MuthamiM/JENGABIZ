@@ -130,6 +130,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
       unawaited(_retryPendingStockUpload());
       unawaited(SecurityCameraService.instance.syncPendingCaptures());
       if (_isSignedInScreen(screen) && screen != AppScreen.update) {
+        _dismissedUpdateCode = 0;
         unawaited(_loadAvailableUpdate(openIfAvailable: true));
       }
     } else if (state == AppLifecycleState.paused ||
@@ -298,23 +299,13 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     final update = await (widget.updateLoader ??
         AppUpdateService.instance.availableRelease)();
     if (!mounted || update == null) return;
-    var dismissedUpdateCode = _dismissedUpdateCode;
-    try {
-      final savedDismissed = (await SharedPreferences.getInstance())
-              .getInt('jengabiz_update_dismissed_code') ??
-          0;
-      if (savedDismissed > dismissedUpdateCode) {
-        dismissedUpdateCode = savedDismissed;
-      }
-    } catch (_) {}
-    _dismissedUpdateCode = dismissedUpdateCode;
-    if (update.versionCode <= dismissedUpdateCode) return;
 
     setState(() => _availableUpdate = update);
     if (openIfAvailable &&
         _isSignedInScreen(screen) &&
         screen != AppScreen.update &&
-        screen != AppScreen.notifications) {
+        screen != AppScreen.notifications &&
+        update.versionCode > _dismissedUpdateCode) {
       setState(() {
         _screenBeforeUpdate = screen;
         screen = AppScreen.update;
@@ -331,10 +322,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
     if (release != null) {
       _dismissedUpdateCode = release.versionCode;
       unawaited(SharedPreferences.getInstance().then(
-        (preferences) => preferences.setInt(
-          'jengabiz_update_dismissed_code',
-          release.versionCode,
-        ),
+        (preferences) => preferences.remove('jengabiz_update_dismissed_code'),
       ));
     }
     final target = _isSignedInScreen(_screenBeforeUpdate) &&
@@ -477,6 +465,7 @@ class _RootState extends State<Root> with WidgetsBindingObserver {
           go: go,
           unread: unread,
           avatarApiService: widget.apiService,
+          availableUpdate: _availableUpdate,
         );
       case AppScreen.analytics:
         return AnalyticsScreen(
@@ -1190,10 +1179,12 @@ class HomeScreen extends StatelessWidget {
     required this.go,
     required this.unread,
     this.avatarApiService,
+    this.availableUpdate,
   });
   final void Function(AppScreen) go;
   final int unread;
   final JengaApiService? avatarApiService;
+  final JengaBizRelease? availableUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -1261,6 +1252,60 @@ class HomeScreen extends StatelessWidget {
 
     return NavShell(active: AppScreen.home, go: go, children: [
       AppHeader(go: go, unread: unread, avatarApiService: avatarApiService),
+      if (availableUpdate != null) ...[
+        GestureDetector(
+          onTap: () => go(AppScreen.update),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5FD),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFD6E4FF)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E6BFF),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.system_update_rounded,
+                      color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Update ready: v${availableUpdate!.versionName}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF17162A),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Tap to update for smooth app functioning',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF777487),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded,
+                    color: Color(0xFF1E6BFF)),
+              ],
+            ),
+          ),
+        ),
+      ],
       Text.rich(
           TextSpan(children: [
             const TextSpan(text: 'Hi, '),

@@ -1,11 +1,11 @@
 {
-  "version_name": "1.1.19",
-  "version_code": 30,
-  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.19/JengaBiz-1.1.19.apk",
-  "sha256": "1b9c2c20fd7b3ed7041858550d602cea12a5995a5d8028b5266c3302854b12a2",
+  "version_name": "1.1.20",
+  "version_code": 31,
+  "apk_url": "https://jengabiz.mftechnologies.org/downloads/v1.1.20/JengaBiz-1.1.20.apk",
+  "sha256": "394feab84b1cbd442c89823f229cf7f7811f3d12c747ce1b01fb5a9e830e73c0",
   "release_notes": [
-    "Cleaned up home screen header by removing redundant top calculator icon in favor of the primary Business Calculator dashboard card.",
-    "Redesigned the download progress indicator: replaced the thin blue progress line with a circular percentage gauge and status card.",
-    "Unified calculator styling to native JengaBiz brand colors and typography with all emojis removed."
+    "Ensured recurring update prompts keep the app running smoothly on the latest release until updated.",
+    "Added interactive update status card on the home business overview screen.",
+    "Synced product stock images directly to the dedicated TeleDrive account folder on disk."
   ]
 }
