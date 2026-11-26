@@ -607,10 +607,6 @@ class AppHeader extends StatelessWidget {
                 child: Avatar(size: 46, apiService: avatarApiService)),
         Row(children: [
           RoundBtn(
-              icon: Icons.calculate_outlined,
-              onTap: () => go(AppScreen.calculator)),
-          const SizedBox(width: 9),
-          RoundBtn(
               icon: Icons.notifications_none_rounded,
               badge: unread,
               onTap: () => go(AppScreen.notifications)),
